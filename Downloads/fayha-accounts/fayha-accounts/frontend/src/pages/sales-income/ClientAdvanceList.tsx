@@ -13,9 +13,10 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { ClientAdvance, Client, TransactionMethod, PaymentMethodType } from '../../types';
-import { clientAdvancesApi, customersApi } from '../../services/api';
+import { clientAdvancesApi, customersApi, accountsApi } from '../../services/api';
 import Pagination from '../../components/common/Pagination';
 import Modal from '../../components/common/Modal';
+import SearchableSelect from '../../components/common/SearchableSelect';
 
 
 const ClientAdvanceList: React.FC = () => {
@@ -30,11 +31,13 @@ const ClientAdvanceList: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Accounts for ledger selection
+  const [accountOptions, setAccountOptions] = useState<{ value: string; label: string }[]>([]);
+
   // Modal form state
   const [formTransactionMethod, setFormTransactionMethod] = useState<TransactionMethod>('Credit');
   const [formClientId, setFormClientId] = useState('');
-  const [formAccountingMethod, setFormAccountingMethod] = useState('Debit');
-  const [formParentGroup, setFormParentGroup] = useState('');
+  const [formAccountId, setFormAccountId] = useState('');
   const [formAmount, setFormAmount] = useState<number>(0);
   const [formDate, setFormDate] = useState('');
   const [formReceiptVoucher, setFormReceiptVoucher] = useState('');
@@ -43,9 +46,14 @@ const ClientAdvanceList: React.FC = () => {
   const [formNote, setFormNote] = useState('');
 
   useEffect(() => {
-    Promise.all([clientAdvancesApi.getAll(), customersApi.getAll()]).then(([advList, clientList]: any) => {
+    Promise.all([clientAdvancesApi.getAll(), customersApi.getAll(), accountsApi.getAll()]).then(([advList, clientList, accList]: any) => {
       setAdvances(Array.isArray(advList) ? advList : []);
       setClients(Array.isArray(clientList) ? clientList : []);
+      const accounts = Array.isArray(accList) ? accList : [];
+      setAccountOptions(accounts.map((a: any) => ({
+        value: a.id,
+        label: `[${a.code}] ${a.name}${a.type ? ' - (' + a.type + ')' : ''}`,
+      })));
       setLoading(false);
     }).catch(() => { setAdvances([]); setClients([]); setLoading(false); });
   }, []);
@@ -86,8 +94,7 @@ const ClientAdvanceList: React.FC = () => {
   const resetForm = () => {
     setFormTransactionMethod('Credit');
     setFormClientId('');
-    setFormAccountingMethod('Debit');
-    setFormParentGroup('');
+    setFormAccountId('');
     setFormAmount(0);
     setFormDate('');
     setFormReceiptVoucher('');
@@ -99,6 +106,7 @@ const ClientAdvanceList: React.FC = () => {
   const handleEditAdvance = (adv: any) => {
     setEditingId(adv.id);
     setFormClientId(adv.clientId || '');
+    setFormAccountId(adv.accountId || '');
     setFormAmount(adv.amount || 0);
     setFormDate(adv.date ? new Date(adv.date).toISOString().split('T')[0] : '');
     setFormPaymentMethod(adv.paymentMethod || 'Cash');
@@ -130,11 +138,18 @@ const ClientAdvanceList: React.FC = () => {
       return;
     }
     setSaving(true);
+    if (!formAccountId) {
+      toast.error('Please select a ledger account (Bank/Cash).', {
+        style: { borderRadius: '12px', background: '#ef4444', color: '#fff' },
+      });
+      return;
+    }
     const payload = {
       clientId: formClientId,
       amount: formAmount,
       date: formDate,
       paymentMethod: formPaymentMethod,
+      accountId: formAccountId,
       reference: formReceiptVoucher || undefined,
       description: formNote || `${formTransactionMethod} advance - ${formPaymentAgainst}`,
       status: 'ACTIVE',
@@ -422,22 +437,9 @@ const ClientAdvanceList: React.FC = () => {
       {/* Add Client Advance Modal */}
       <Modal isOpen={modalOpen} onClose={() => { setModalOpen(false); setEditingId(null); }} title={editingId ? 'Edit Client Advance' : 'Add Client Advance'} size="lg">
         <div className="space-y-4">
-          {/* Transaction Method */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Transaction Method</label>
-            <select
-              value={formTransactionMethod}
-              onChange={(e) => setFormTransactionMethod(e.target.value as TransactionMethod)}
-              className="input-premium w-full"
-            >
-              <option value="Credit">Credit</option>
-              <option value="Debit">Debit</option>
-            </select>
-          </div>
-
           {/* Client */}
           <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Client</label>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Client <span className="text-rose-500">*</span></label>
             <select
               value={formClientId}
               onChange={(e) => setFormClientId(e.target.value)}
@@ -452,100 +454,108 @@ const ClientAdvanceList: React.FC = () => {
             </select>
           </div>
 
-          {/* Transaction Method In Accounting */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-              Transaction Method In Accounting
-            </label>
-            <select
-              value={formAccountingMethod}
-              onChange={(e) => setFormAccountingMethod(e.target.value)}
-              className="input-premium w-full"
-            >
-              <option value="Debit">Debit</option>
-              <option value="Credit">Credit</option>
-            </select>
-          </div>
-
-          {/* Parent Group In Accounting */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-              Parent Group In Accounting
-            </label>
-            <select
-              value={formParentGroup}
-              onChange={(e) => setFormParentGroup(e.target.value)}
-              className="input-premium w-full"
-            >
-              <option value="">Please Select Ledger</option>
-              <option value="[01] Assets">[01] Assets</option>
-              <option value="[01-01-01-0004] SNB BANK">[01-01-01-0004] SNB BANK</option>
-              <option value="[02-03-01-0003] Trade Receivables">[02-03-01-0003] Trade Receivables</option>
-              <option value="[02] Liabilities">[02] Liabilities</option>
-            </select>
-          </div>
-
-          {/* Amount */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Amount</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={formAmount || ''}
-              onChange={(e) => setFormAmount(parseFloat(e.target.value) || 0)}
-              placeholder="0.00"
-              className="input-premium w-full"
-            />
-          </div>
-
-          {/* Date */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Date</label>
-            <input
-              type="date"
-              value={formDate}
-              onChange={(e) => setFormDate(e.target.value)}
-              className="input-premium w-full"
-            />
-          </div>
-
-          {/* Receipt / Voucher Number */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Receipt / Voucher Number</label>
-            <input
-              type="text"
-              value={formReceiptVoucher}
-              onChange={(e) => setFormReceiptVoucher(e.target.value)}
-              placeholder="e.g. RCV-2026-0009"
-              className="input-premium w-full"
-            />
-          </div>
-
-          {/* Payment Against */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Payment Against</label>
-            <select
-              value={formPaymentAgainst}
-              onChange={(e) => setFormPaymentAgainst(e.target.value)}
-              className="input-premium w-full"
-            >
-              <option value="On Account">On Account</option>
-            </select>
+          {/* Amount + Date row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Amount <span className="text-rose-500">*</span></label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formAmount || ''}
+                onChange={(e) => setFormAmount(parseFloat(e.target.value) || 0)}
+                placeholder="0.00"
+                className="input-premium w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Date <span className="text-rose-500">*</span></label>
+              <input
+                type="date"
+                value={formDate}
+                onChange={(e) => setFormDate(e.target.value)}
+                className="input-premium w-full"
+              />
+            </div>
           </div>
 
           {/* Payment Method */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Payment Method</label>
-            <select
-              value={formPaymentMethod}
-              onChange={(e) => setFormPaymentMethod(e.target.value as PaymentMethodType)}
-              className="input-premium w-full"
-            >
-              <option value="Cash">Cash</option>
-              <option value="Bank">Bank</option>
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Payment Method <span className="text-rose-500">*</span></label>
+              <select
+                value={formPaymentMethod}
+                onChange={(e) => setFormPaymentMethod(e.target.value as PaymentMethodType)}
+                className="input-premium w-full"
+              >
+                <option value="Cash">Cash</option>
+                <option value="Bank">Bank Transfer</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Receipt / Voucher No.</label>
+              <input
+                type="text"
+                value={formReceiptVoucher}
+                onChange={(e) => setFormReceiptVoucher(e.target.value)}
+                placeholder="e.g. RCV-2026-0009"
+                className="input-premium w-full"
+              />
+            </div>
           </div>
+
+          {/* Received Into Account (Bank/Cash) */}
+          <div>
+            <SearchableSelect
+              label="Received Into Account (Bank / Cash)"
+              required
+              options={accountOptions}
+              value={formAccountId}
+              onChange={setFormAccountId}
+              placeholder="Search bank or cash account..."
+            />
+          </div>
+
+          {/* Account Details — Journal Entry Preview */}
+          {formAmount > 0 && formAccountId && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-3 space-y-2">
+              <p className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                <FileText className="h-3 w-3 inline mr-1" />
+                Journal Entry Preview
+              </p>
+              <div className="bg-white rounded-lg border border-indigo-100 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-indigo-50/70">
+                      <th className="text-left py-1.5 px-3 font-semibold text-indigo-600">Account</th>
+                      <th className="text-right py-1.5 px-3 font-semibold text-indigo-600">Debit (DR)</th>
+                      <th className="text-right py-1.5 px-3 font-semibold text-indigo-600">Credit (CR)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t border-indigo-100">
+                      <td className="py-1.5 px-3 font-medium text-slate-800">
+                        {accountOptions.find(a => a.value === formAccountId)?.label || 'Bank / Cash'}
+                      </td>
+                      <td className="py-1.5 px-3 text-right font-bold text-emerald-700">SAR {formAmount.toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+                      <td className="py-1.5 px-3 text-right text-slate-300">—</td>
+                    </tr>
+                    <tr className="border-t border-indigo-100">
+                      <td className="py-1.5 px-3 font-medium text-slate-800">Client Advance Liability</td>
+                      <td className="py-1.5 px-3 text-right text-slate-300">—</td>
+                      <td className="py-1.5 px-3 text-right font-bold text-rose-600">SAR {formAmount.toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                    <tr className="border-t-2 border-indigo-200 bg-indigo-50/50">
+                      <td className="py-1.5 px-3 font-bold text-indigo-800">Total</td>
+                      <td className="py-1.5 px-3 text-right font-bold text-indigo-800">SAR {formAmount.toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+                      <td className="py-1.5 px-3 text-right font-bold text-indigo-800">SAR {formAmount.toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-indigo-500">DR {formPaymentMethod === 'Bank' ? 'Bank' : 'Cash'} account, CR Client Advance Liability</p>
+            </div>
+          )}
 
           {/* Note */}
           <div>
@@ -554,7 +564,7 @@ const ClientAdvanceList: React.FC = () => {
               value={formNote}
               onChange={(e) => setFormNote(e.target.value)}
               placeholder="Additional notes..."
-              rows={3}
+              rows={2}
               className="input-premium w-full resize-none"
             />
           </div>

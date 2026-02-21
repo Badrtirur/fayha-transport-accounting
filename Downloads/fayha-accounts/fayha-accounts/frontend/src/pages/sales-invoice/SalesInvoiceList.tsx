@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { SalesInvoice, InvoiceCategory, Client } from '../../types';
-import { salesInvoicesApi, customersApi, jobReferencesApi, banksApi, journalsApi } from '../../services/api';
+import { salesInvoicesApi, customersApi, jobReferencesApi, banksApi, journalsApi, clientAdvancesApi } from '../../services/api';
 import Pagination from '../../components/common/Pagination';
 
 const formatDate = (d: any): string => {
@@ -145,6 +145,9 @@ const SalesInvoiceList: React.FC = () => {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [paymentJournals, setPaymentJournals] = useState<Record<string, any>>({});
 
+  // Client advance balances — keyed by clientId
+  const [clientAdvanceBalances, setClientAdvanceBalances] = useState<Record<string, number>>({});
+
   // Receive Payment — now handled via Payment Entry form
 
   const itemsPerPage = 8;
@@ -156,6 +159,16 @@ const SalesInvoiceList: React.FC = () => {
       setJobRefs(Array.isArray(jrData) ? jrData : []);
       setBanks(Array.isArray(bankData) ? bankData : []);
       setLoading(false);
+
+      // Load advance balances for all unique clients
+      const clientIds = new Set<string>((Array.isArray(invData) ? invData : []).map((i: any) => i.clientId).filter(Boolean));
+      clientIds.forEach((cid) => {
+        clientAdvancesApi.getByClient(cid).then((result: any) => {
+          if (result.totalAvailable > 0) {
+            setClientAdvanceBalances((prev) => ({ ...prev, [cid]: result.totalAvailable }));
+          }
+        }).catch(() => {});
+      });
     }).catch(() => { setLoading(false); });
   }, []);
 
@@ -451,6 +464,11 @@ const SalesInvoiceList: React.FC = () => {
                           >
                             {getClientName(inv.clientId)}
                           </button>
+                          {clientAdvanceBalances[inv.clientId] > 0 && inv.status !== 'PAID' && (
+                            <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              Advance: SAR {clientAdvanceBalances[inv.clientId].toLocaleString('en', { minimumFractionDigits: 2 })}
+                            </span>
+                          )}
                         </td>
 
                         {/* Job Reference */}

@@ -862,7 +862,7 @@ export const clientAdvanceController = {
   },
   async create(req: Request, res: Response) {
     try {
-      const allowedFields = ['advanceNumber', 'clientId', 'amount', 'date', 'paymentMethod', 'bankAccountId', 'reference', 'description', 'status', 'usedAmount', 'remainingAmount'];
+      const allowedFields = ['advanceNumber', 'clientId', 'amount', 'date', 'paymentMethod', 'bankAccountId', 'accountId', 'reference', 'description', 'status', 'usedAmount', 'remainingAmount'];
       const data: any = {};
       for (const key of allowedFields) {
         if (req.body[key] !== undefined) data[key] = req.body[key];
@@ -884,6 +884,10 @@ export const clientAdvanceController = {
       // Set remainingAmount = amount - usedAmount
       data.remainingAmount = (data.amount || 0) - (data.usedAmount || 0);
 
+      // Extract accountId before create (not a DB column, used for journal entry only)
+      const selectedAccountId = data.accountId || null;
+      delete data.accountId;
+
       // Create the client advance
       const advance = await prisma.$transaction(async (tx) => {
         const advance = await tx.clientAdvance.create({ data, include: { client: true } });
@@ -893,10 +897,10 @@ export const clientAdvanceController = {
         if (userId && data.amount > 0) {
           const totalAmt = data.amount;
 
-          // Find the debit account (Cash or Bank)
-          let debitAccountId: string | null = null;
+          // Use the explicitly provided accountId, or fall back to lookup
+          let debitAccountId: string | null = selectedAccountId;
 
-          if ((data.paymentMethod === 'BANK_TRANSFER' || data.paymentMethod === 'Bank' || data.paymentMethod === 'Cheque') && data.bankAccountId) {
+          if (!debitAccountId && (data.paymentMethod === 'BANK_TRANSFER' || data.paymentMethod === 'Bank' || data.paymentMethod === 'Cheque') && data.bankAccountId) {
             const linkedAccount = await tx.account.findFirst({
               where: { bankId: data.bankAccountId },
             });
