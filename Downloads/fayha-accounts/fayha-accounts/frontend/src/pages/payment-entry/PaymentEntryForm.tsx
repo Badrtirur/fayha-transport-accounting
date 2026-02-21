@@ -252,22 +252,65 @@ const PaymentEntryForm: React.FC = () => {
     }) || null;
   }, [invoiceId, existingPayments]);
 
-  // ── Auto-populate payment lines when cost items or ledger account change ──
+  // Find Accounts Receivable account for double-entry
+  const arAccount = useMemo(() => {
+    return ledgerOptions.find(a =>
+      a.label.toLowerCase().includes('receivable') ||
+      a.label.toLowerCase().includes('trade receivable')
+    ) || null;
+  }, [ledgerOptions]);
+
+  // Compute the net cash amount after advance
+  const netCashAmount = useMemo(() => {
+    if (applyAdvance && advanceApplyAmount > 0) {
+      return Math.max(0, selectedCostTotal - advanceApplyAmount);
+    }
+    return selectedCostTotal;
+  }, [selectedCostTotal, applyAdvance, advanceApplyAmount]);
+
+  // ── Auto-populate payment lines: DR Bank/Cash, CR Accounts Receivable ──
   useEffect(() => {
     if (selectedCostDetails.length === 0 || selectedCostTotal === 0) return;
+    if (!ledgerAccountId) return;
 
-    // Find the label for the selected ledger account
-    const accLabel = ledgerOptions.find(a => a.value === ledgerAccountId)?.label || '';
+    const bankLabel = ledgerOptions.find(a => a.value === ledgerAccountId)?.label || 'Bank/Cash';
+    const arLabel = arAccount?.label || 'Accounts Receivable';
+    const arId = arAccount?.value || '';
 
-    // Auto-set the first payment line with the total selected amount + the ledger account
-    setLines([{
-      id: generateLineId(),
-      paymentStatus: accLabel || (isFullPayment ? 'Full Payment' : 'Partial Payment'),
-      accountId: ledgerAccountId,
-      crAmount: selectedCostTotal,
-      drAmount: selectedCostTotal,
-    }]);
-  }, [selectedCostTotal, isFullPayment, ledgerAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const newLines: FormLine[] = [
+      {
+        id: generateLineId(),
+        paymentStatus: `DR: ${bankLabel}`,
+        accountId: ledgerAccountId,
+        crAmount: 0,
+        drAmount: netCashAmount,
+      },
+      {
+        id: generateLineId(),
+        paymentStatus: `CR: ${arLabel}`,
+        accountId: arId,
+        crAmount: selectedCostTotal,
+        drAmount: 0,
+      },
+    ];
+
+    // If advance is applied, add a 3rd line: DR Advance Liability
+    if (applyAdvance && advanceApplyAmount > 0) {
+      const advLiabilityAcc = ledgerOptions.find(a =>
+        a.label.toLowerCase().includes('advance') ||
+        a.label.toLowerCase().includes('customer deposit')
+      );
+      newLines.splice(1, 0, {
+        id: generateLineId(),
+        paymentStatus: `DR: ${advLiabilityAcc?.label || 'Client Advance Liability'}`,
+        accountId: advLiabilityAcc?.value || '',
+        crAmount: 0,
+        drAmount: advanceApplyAmount,
+      });
+    }
+
+    setLines(newLines);
+  }, [selectedCostTotal, netCashAmount, ledgerAccountId, applyAdvance, advanceApplyAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalCr = lines.reduce((sum, l) => sum + (l.crAmount || 0), 0);
   const totalDr = lines.reduce((sum, l) => sum + (l.drAmount || 0), 0);
@@ -645,6 +688,58 @@ const PaymentEntryForm: React.FC = () => {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Account Details — Journal Entry Preview */}
+        {selectedCostTotal > 0 && ledgerAccountId && (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 uppercase tracking-wider">
+              <FileText className="h-3.5 w-3.5" />
+              Account Details — Journal Entry Preview
+            </div>
+            <div className="bg-white rounded-lg border border-indigo-100 overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-indigo-50/70">
+                    <th className="text-left py-2 px-3 font-semibold text-indigo-600">Account</th>
+                    <th className="text-right py-2 px-3 font-semibold text-indigo-600">Debit (DR)</th>
+                    <th className="text-right py-2 px-3 font-semibold text-indigo-600">Credit (CR)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-t border-indigo-100">
+                    <td className="py-2 px-3 font-medium text-slate-800">
+                      {ledgerOptions.find(a => a.value === ledgerAccountId)?.label || 'Bank / Cash'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-bold text-emerald-700">{fmtSAR(netCashAmount)}</td>
+                    <td className="py-2 px-3 text-right text-slate-300">—</td>
+                  </tr>
+                  {applyAdvance && advanceApplyAmount > 0 && (
+                    <tr className="border-t border-indigo-100">
+                      <td className="py-2 px-3 font-medium text-slate-800">Client Advance Liability</td>
+                      <td className="py-2 px-3 text-right font-bold text-emerald-700">{fmtSAR(advanceApplyAmount)}</td>
+                      <td className="py-2 px-3 text-right text-slate-300">—</td>
+                    </tr>
+                  )}
+                  <tr className="border-t border-indigo-100">
+                    <td className="py-2 px-3 font-medium text-slate-800">
+                      {arAccount?.label || 'Accounts Receivable'}
+                    </td>
+                    <td className="py-2 px-3 text-right text-slate-300">—</td>
+                    <td className="py-2 px-3 text-right font-bold text-rose-600">{fmtSAR(selectedCostTotal)}</td>
+                  </tr>
+                  <tr className="border-t-2 border-indigo-200 bg-indigo-50/50">
+                    <td className="py-2 px-3 font-bold text-indigo-800">Total</td>
+                    <td className="py-2 px-3 text-right font-bold text-indigo-800">{fmtSAR(netCashAmount + (applyAdvance ? advanceApplyAmount : 0))}</td>
+                    <td className="py-2 px-3 text-right font-bold text-indigo-800">{fmtSAR(selectedCostTotal)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-indigo-500">
+              This journal entry will be auto-created when you submit the payment.
+            </p>
           </div>
         )}
 
