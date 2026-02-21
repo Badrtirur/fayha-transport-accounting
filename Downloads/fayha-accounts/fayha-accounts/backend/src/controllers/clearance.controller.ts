@@ -2069,15 +2069,12 @@ export const paymentEntryController = {
           }
         }
 
-        // Update customer balance if linked
+        // Update customer balance if linked to a client (payment received against invoice)
         if (clientId && drSum > 0) {
-          const isReceipt = entryType === 'Receive' || entryType === 'Receipt';
-          if (isReceipt) {
-            await tx.customer.update({
-              where: { id: clientId },
-              data: { totalPaid: { increment: drSum }, outstandingBalance: { decrement: drSum } },
-            });
-          }
+          await tx.customer.update({
+            where: { id: clientId },
+            data: { totalPaid: { increment: drSum }, outstandingBalance: { decrement: drSum } },
+          });
         }
 
         // Mark linked sales invoice as PAID
@@ -2107,7 +2104,7 @@ export const paymentEntryController = {
                 });
               }
             }
-          } catch { /* invoice update failed — non-blocking */ }
+          } catch (err: any) { console.error('Invoice update failed:', err?.message || err); }
         }
 
         // Apply client advances if provided
