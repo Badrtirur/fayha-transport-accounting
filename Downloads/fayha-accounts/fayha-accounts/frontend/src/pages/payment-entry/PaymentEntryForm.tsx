@@ -340,6 +340,12 @@ const PaymentEntryForm: React.FC = () => {
       });
       return;
     }
+    if (!ledgerAccountId) {
+      toast.error('Please select a Ledger Account (Bank/Cash).', {
+        style: { borderRadius: '12px', background: '#ef4444', color: '#fff' },
+      });
+      return;
+    }
     if (existingPaymentForInvoice) {
       toast.error(`A payment entry already exists for this invoice (${existingPaymentForInvoice.documentId || existingPaymentForInvoice.id}). Cannot create duplicate.`, {
         style: { borderRadius: '12px', background: '#ef4444', color: '#fff' },

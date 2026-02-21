@@ -137,13 +137,13 @@ const ClientAdvanceList: React.FC = () => {
       toast.error('Amount must be greater than 0.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
       return;
     }
-    setSaving(true);
     if (!formAccountId) {
       toast.error('Please select a ledger account (Bank/Cash).', {
         style: { borderRadius: '12px', background: '#ef4444', color: '#fff' },
       });
       return;
     }
+    setSaving(true);
     const payload = {
       clientId: formClientId,
       amount: formAmount,

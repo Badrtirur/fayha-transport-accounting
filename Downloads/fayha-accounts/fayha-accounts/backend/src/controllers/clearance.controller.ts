@@ -560,6 +560,15 @@ export const salesInvoiceController = {
   },
   async update(req: Request, res: Response) {
     try {
+      const id = req.params.id;
+      const existing = await prisma.salesInvoice.findUnique({ where: { id } });
+      if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
+
+      // Prevent editing paid invoices
+      if (existing.status === 'PAID') {
+        return res.status(400).json({ success: false, error: 'Cannot edit a fully paid invoice' });
+      }
+
       const { items, ...rest } = req.body;
       const allowed = [
         'invoiceNumber', 'clientId', 'jobReferenceId', 'salesmanId',
@@ -580,12 +589,143 @@ export const salesInvoiceController = {
       if (data.invoiceDate && typeof data.invoiceDate === 'string') data.invoiceDate = new Date(data.invoiceDate);
       if (data.dueDate && typeof data.dueDate === 'string') data.dueDate = new Date(data.dueDate);
 
-      const invoice = await prisma.salesInvoice.update({
-        where: { id: req.params.id },
-        data,
-        include: { client: true, items: true },
+      // Parse numeric fields
+      const numFields = ['subtotal', 'vatRate', 'vatAmount', 'totalAmount', 'paidAmount', 'balanceDue', 'paymentTermDays'];
+      for (const f of numFields) {
+        if (data[f] !== undefined) data[f] = Number(data[f]) || 0;
+      }
+
+      // Recalculate balanceDue
+      const newTotal = data.totalAmount !== undefined ? data.totalAmount : existing.totalAmount;
+      const newPaid = data.paidAmount !== undefined ? data.paidAmount : existing.paidAmount;
+      data.balanceDue = Math.max(0, (newTotal || 0) - (newPaid || 0));
+
+      const oldTotal = existing.totalAmount || 0;
+      const amountChanged = data.totalAmount !== undefined && Math.abs(data.totalAmount - oldTotal) > 0.01;
+
+      const result = await prisma.$transaction(async (tx) => {
+        // If totalAmount changed, reverse old journal and create new one
+        if (amountChanged) {
+          const userId = (req as any).user?.id;
+
+          // Reverse old journal entries
+          const oldJournals = await tx.journalEntry.findMany({
+            where: { referenceType: 'SALES_INVOICE', reference: existing.invoiceNumber },
+            include: { lines: true },
+          });
+          for (const je of oldJournals) {
+            for (const line of je.lines || []) {
+              const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+              if (Math.abs(netAmount) > 0.001) {
+                await tx.account.update({ where: { id: line.accountId }, data: { currentBalance: { decrement: netAmount } } });
+              }
+            }
+            await tx.journalEntry.delete({ where: { id: je.id } });
+          }
+
+          // Reverse old customer balance
+          if (existing.clientId && oldTotal > 0) {
+            await tx.customer.update({
+              where: { id: existing.clientId },
+              data: { totalInvoiced: { decrement: oldTotal }, outstandingBalance: { decrement: oldTotal } },
+            });
+          }
+
+          // Update line items if provided
+          if (items) {
+            await tx.salesInvoiceItem.deleteMany({ where: { salesInvoiceId: id } });
+            const processedItems = (items || []).map((item: any, idx: number) => ({
+              salesInvoiceId: id,
+              lineNumber: idx + 1,
+              serviceId: (item.serviceId && item.serviceId.length >= 10) ? item.serviceId : undefined,
+              nameEn: item.nameEn || item.name || '',
+              nameAr: item.nameAr || '',
+              description: item.description || '',
+              amount: Number(item.amount) || 0,
+              vatRate: Number(item.vatRate || item.vatPercent || 0.15),
+              vatAmount: Number(item.vatAmount) || 0,
+              totalAmount: Number(item.totalAmount || item.total) || 0,
+            }));
+            if (processedItems.length > 0) {
+              await tx.salesInvoiceItem.createMany({ data: processedItems });
+            }
+          }
+
+          // Update the invoice
+          const invoice = await tx.salesInvoice.update({
+            where: { id },
+            data,
+            include: { client: true, items: true },
+          });
+
+          // Create new journal entry with new amounts
+          const newTotalAmt = data.totalAmount;
+          const vatAmt = data.vatAmount || 0;
+          const subtotalAmt = data.subtotal || (newTotalAmt - vatAmt);
+          const clientId = data.clientId || existing.clientId;
+
+          if (userId && newTotalAmt > 0) {
+            const arAccount = await tx.account.findFirst({ where: { OR: [{ subType: 'Accounts Receivable' }, { name: { contains: 'Accounts Receivable' } }, { name: { contains: 'Receivable' } }], isActive: true } });
+            const revenueAccount = await tx.account.findFirst({ where: { OR: [{ subType: 'Sales Revenue' }, { type: 'REVENUE' }, { name: { contains: 'Sales' } }, { name: { contains: 'Revenue' } }], isActive: true } });
+            let vatAccount: any = null;
+            if (vatAmt > 0) {
+              vatAccount = await tx.account.findFirst({ where: { OR: [{ name: { contains: 'VAT Output' } }, { name: { contains: 'VAT Payable' } }, { subType: 'VAT' }], isActive: true } });
+            }
+
+            if (arAccount && revenueAccount) {
+              const entryNumber = await generateNumber('SALES_INVOICE', 'JE-INV');
+              const journalLines: any[] = [
+                { lineNumber: 1, accountId: arAccount.id, description: `Accounts Receivable - ${invoice.client?.name || ''} - ${invoice.invoiceNumber}`, debitAmount: newTotalAmt, creditAmount: 0, customerId: clientId || undefined },
+              ];
+              if (vatAccount && vatAmt > 0) {
+                journalLines.push({ lineNumber: 2, accountId: revenueAccount.id, description: `Sales Revenue - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: subtotalAmt });
+                journalLines.push({ lineNumber: 3, accountId: vatAccount.id, description: `VAT Output 15% - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: vatAmt });
+              } else {
+                journalLines.push({ lineNumber: 2, accountId: revenueAccount.id, description: `Sales Revenue - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: newTotalAmt });
+              }
+
+              await tx.journalEntry.create({
+                data: {
+                  entryNumber, date: data.invoiceDate || existing.invoiceDate || new Date(),
+                  description: `Sales Invoice: ${invoice.invoiceNumber} - ${invoice.client?.name || ''}`,
+                  reference: invoice.invoiceNumber, referenceType: 'SALES_INVOICE',
+                  totalDebit: newTotalAmt, totalCredit: newTotalAmt,
+                  status: 'POSTED', createdById: userId, postedAt: new Date(),
+                  notes: JSON.stringify({ salesInvoiceId: invoice.id, clientId }),
+                  lines: { create: journalLines },
+                },
+              });
+
+              // Update new account balances
+              await tx.account.update({ where: { id: arAccount.id }, data: { currentBalance: { increment: newTotalAmt } } });
+              await tx.account.update({ where: { id: revenueAccount.id }, data: { currentBalance: { increment: vatAccount ? subtotalAmt : newTotalAmt } } });
+              if (vatAccount && vatAmt > 0) {
+                await tx.account.update({ where: { id: vatAccount.id }, data: { currentBalance: { increment: vatAmt } } });
+              }
+            }
+          }
+
+          // Update new customer balance
+          if (clientId && newTotalAmt > 0) {
+            await tx.customer.update({
+              where: { id: clientId },
+              data: { totalInvoiced: { increment: newTotalAmt }, outstandingBalance: { increment: newTotalAmt } },
+            });
+          }
+
+          return invoice;
+        } else {
+          // No amount change - simple update
+          const invoice = await tx.salesInvoice.update({
+            where: { id },
+            data,
+            include: { client: true, items: true },
+          });
+          return invoice;
+        }
       });
-      res.json({ success: true, data: invoice });
+
+      res.json({ success: true, data: result });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -814,8 +954,50 @@ export const salesInvoiceController = {
   },
   async remove(req: Request, res: Response) {
     try {
-      await prisma.salesInvoice.delete({ where: { id: req.params.id } });
-      res.json({ success: true, message: 'Deleted' });
+      const invoice = await prisma.salesInvoice.findUnique({ where: { id: req.params.id }, include: { items: true } });
+      if (!invoice) return res.status(404).json({ success: false, error: 'Not found' });
+
+      // Prevent deletion of paid or partially paid invoices
+      if (invoice.status === 'PAID' || invoice.status === 'PARTIAL') {
+        return res.status(400).json({ success: false, error: `Cannot delete a ${invoice.status.toLowerCase()} invoice. Reverse the payment first.` });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // 1. Reverse journal entries and account balances
+        const journals = await tx.journalEntry.findMany({
+          where: { referenceType: 'SALES_INVOICE', reference: invoice.invoiceNumber },
+          include: { lines: true },
+        });
+        for (const je of journals) {
+          for (const line of je.lines || []) {
+            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+            if (Math.abs(netAmount) > 0.001) {
+              await tx.account.update({
+                where: { id: line.accountId },
+                data: { currentBalance: { decrement: netAmount } },
+              });
+            }
+          }
+          await tx.journalEntry.delete({ where: { id: je.id } });
+        }
+
+        // 2. Reverse customer totalInvoiced and outstandingBalance
+        if (invoice.clientId && (invoice.totalAmount || 0) > 0) {
+          await tx.customer.update({
+            where: { id: invoice.clientId },
+            data: {
+              totalInvoiced: { decrement: invoice.totalAmount || 0 },
+              outstandingBalance: { decrement: invoice.totalAmount || 0 },
+            },
+          });
+        }
+
+        // 3. Delete invoice items then the invoice
+        await tx.salesInvoiceItem.deleteMany({ where: { salesInvoiceId: invoice.id } });
+        await tx.salesInvoice.delete({ where: { id: invoice.id } });
+      });
+
+      res.json({ success: true, message: 'Deleted and all accounting reversed' });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -840,8 +1022,178 @@ const clientAdvanceCrud = crud(prisma.clientAdvance, { client: true }, { created
 export const clientAdvanceController = {
   getAll: clientAdvanceCrud.getAll,
   getById: clientAdvanceCrud.getById,
-  update: clientAdvanceCrud.update,
-  remove: clientAdvanceCrud.remove,
+  async update(req: Request, res: Response) {
+    try {
+      const id = req.params.id;
+      const existing = await prisma.clientAdvance.findUnique({ where: { id } });
+      if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
+
+      // Don't allow editing used/partially used advances
+      if ((existing.usedAmount || 0) > 0) {
+        return res.status(400).json({ success: false, error: 'Cannot edit an advance that has been partially or fully applied to payments' });
+      }
+
+      const allowedFields = ['clientId', 'amount', 'date', 'paymentMethod', 'bankAccountId', 'reference', 'description'];
+      const data: any = {};
+      for (const key of allowedFields) {
+        if (req.body[key] !== undefined) data[key] = req.body[key];
+      }
+      if (data.date && typeof data.date === 'string') data.date = new Date(data.date);
+      if (data.amount !== undefined) data.amount = Number(data.amount) || 0;
+      data.remainingAmount = (data.amount || existing.amount || 0) - (existing.usedAmount || 0);
+
+      // Extract accountId (not a DB column)
+      const selectedAccountId = req.body.accountId || null;
+
+      const result = await prisma.$transaction(async (tx) => {
+        // 1. Reverse old journal entry and account balances
+        const oldJournals = await tx.journalEntry.findMany({
+          where: { referenceType: 'CLIENT_ADVANCE', reference: existing.advanceNumber },
+          include: { lines: true },
+        });
+        for (const je of oldJournals) {
+          for (const line of je.lines || []) {
+            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+            if (Math.abs(netAmount) > 0.001) {
+              await tx.account.update({
+                where: { id: line.accountId },
+                data: { currentBalance: { decrement: netAmount } },
+              });
+            }
+          }
+          await tx.journalEntry.delete({ where: { id: je.id } });
+        }
+
+        // 2. Reverse old bank transaction
+        const oldBankTxns = await tx.bankTransaction.findMany({
+          where: { documentRef: existing.advanceNumber, documentType: 'ADVANCE' },
+        });
+        for (const bt of oldBankTxns) {
+          const reverseAmount = bt.type === 'CREDIT' ? -bt.amount : bt.amount;
+          await tx.bankAccount.update({
+            where: { id: bt.bankAccountId },
+            data: { currentBalance: { increment: reverseAmount } },
+          });
+          await tx.bankTransaction.delete({ where: { id: bt.id } });
+        }
+
+        // 3. Update the advance record
+        const advance = await tx.clientAdvance.update({
+          where: { id },
+          data,
+          include: { client: true },
+        });
+
+        // 4. Re-create journal entry with new amounts
+        const userId = (req as any).user?.id;
+        const totalAmt = advance.amount || 0;
+        if (userId && totalAmt > 0) {
+          let debitAccountId: string | null = selectedAccountId;
+          if (!debitAccountId && (advance.paymentMethod === 'Bank' || advance.paymentMethod === 'Cheque') && advance.bankAccountId) {
+            const linked = await tx.account.findFirst({ where: { bankId: advance.bankAccountId } });
+            debitAccountId = linked?.id || null;
+          }
+          if (!debitAccountId) {
+            const cash = await tx.account.findFirst({ where: { OR: [{ code: { contains: 'CASH' } }, { name: { contains: 'Cash' } }, { subType: 'Cash' }], isActive: true } });
+            debitAccountId = cash?.id || null;
+          }
+          let advLiab = await tx.account.findFirst({ where: { OR: [{ name: { contains: 'Client Advance' } }, { name: { contains: 'Customer Advance' } }, { name: { contains: 'Advance from' } }, { subType: 'Customer Deposits' }], isActive: true } });
+          if (!advLiab) advLiab = await tx.account.findFirst({ where: { OR: [{ type: 'LIABILITY' }, { name: { contains: 'Liability' } }], isActive: true } });
+
+          if (debitAccountId && advLiab) {
+            const entryNumber = await generateNumber('CLIENT_ADVANCE', 'JE-ADV');
+            await tx.journalEntry.create({
+              data: {
+                entryNumber, date: advance.date || new Date(),
+                description: `Client Advance: ${advance.advanceNumber} - ${advance.client?.name || ''}`,
+                reference: advance.advanceNumber, referenceType: 'CLIENT_ADVANCE',
+                totalDebit: totalAmt, totalCredit: totalAmt,
+                status: 'POSTED', createdById: userId, postedAt: new Date(),
+                notes: JSON.stringify({ clientAdvanceId: advance.id, clientId: advance.clientId, paymentMethod: advance.paymentMethod }),
+                lines: { create: [
+                  { lineNumber: 1, accountId: debitAccountId, description: `Cash/Bank - Client Advance ${advance.advanceNumber}`, debitAmount: totalAmt, creditAmount: 0, customerId: advance.clientId || undefined },
+                  { lineNumber: 2, accountId: advLiab.id, description: `Client Advance Liability - ${advance.client?.name || ''}`, debitAmount: 0, creditAmount: totalAmt, customerId: advance.clientId || undefined },
+                ] },
+              },
+            });
+            await tx.account.update({ where: { id: debitAccountId }, data: { currentBalance: { increment: totalAmt } } });
+            await tx.account.update({ where: { id: advLiab.id }, data: { currentBalance: { increment: totalAmt } } });
+          }
+        }
+
+        // 5. Re-create bank transaction
+        if ((advance.paymentMethod === 'Bank' || advance.paymentMethod === 'Cheque') && advance.bankAccountId) {
+          await tx.bankAccount.update({ where: { id: advance.bankAccountId }, data: { currentBalance: { increment: totalAmt } } });
+          await tx.bankTransaction.create({
+            data: {
+              bankAccountId: advance.bankAccountId, transactionDate: advance.date || new Date(),
+              type: 'CREDIT', description: `Client Advance Received - ${advance.advanceNumber}`,
+              reference: advance.advanceNumber, amount: totalAmt, runningBalance: 0,
+              documentType: 'ADVANCE', documentRef: advance.advanceNumber,
+            },
+          });
+        }
+
+        return advance;
+      });
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+  async remove(req: Request, res: Response) {
+    try {
+      const id = req.params.id;
+      const existing = await prisma.clientAdvance.findUnique({ where: { id } });
+      if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
+
+      // Don't allow deleting used/partially used advances
+      if ((existing.usedAmount || 0) > 0) {
+        return res.status(400).json({ success: false, error: 'Cannot delete an advance that has been partially or fully applied to payments' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        // 1. Reverse journal entries and account balances
+        const journals = await tx.journalEntry.findMany({
+          where: { referenceType: 'CLIENT_ADVANCE', reference: existing.advanceNumber },
+          include: { lines: true },
+        });
+        for (const je of journals) {
+          for (const line of je.lines || []) {
+            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+            if (Math.abs(netAmount) > 0.001) {
+              await tx.account.update({
+                where: { id: line.accountId },
+                data: { currentBalance: { decrement: netAmount } },
+              });
+            }
+          }
+          await tx.journalEntry.delete({ where: { id: je.id } });
+        }
+
+        // 2. Reverse bank transactions
+        const bankTxns = await tx.bankTransaction.findMany({
+          where: { documentRef: existing.advanceNumber, documentType: 'ADVANCE' },
+        });
+        for (const bt of bankTxns) {
+          const reverseAmount = bt.type === 'CREDIT' ? -bt.amount : bt.amount;
+          await tx.bankAccount.update({
+            where: { id: bt.bankAccountId },
+            data: { currentBalance: { increment: reverseAmount } },
+          });
+          await tx.bankTransaction.delete({ where: { id: bt.id } });
+        }
+
+        // 3. Delete the advance record
+        await tx.clientAdvance.delete({ where: { id } });
+      });
+
+      res.json({ success: true, message: 'Deleted and all accounting reversed' });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
   async getByClient(req: Request, res: Response) {
     try {
       const { clientId } = req.params;
@@ -1971,7 +2323,10 @@ export const paymentEntryController = {
 
         // Find a default account for lines without specific account
         let defaultAccount = await tx.account.findFirst({ where: { isActive: true } });
-        const defaultAccountId = defaultAccount?.id || '';
+        if (!defaultAccount) {
+          throw new Error('No active accounts found in chart of accounts. Please set up accounts first.');
+        }
+        const defaultAccountId = defaultAccount.id;
 
         // Build journal lines
         const journalLines = (lines || []).map((l: any, idx: number) => ({
@@ -2183,7 +2538,9 @@ export const paymentEntryController = {
               });
 
               // Update account balances
-              await tx.account.update({ where: { id: advanceLiabilityAccount.id }, data: { currentBalance: { increment: applyAmount } } });
+              // DR Advance Liability: debiting a liability REDUCES it
+              await tx.account.update({ where: { id: advanceLiabilityAccount.id }, data: { currentBalance: { decrement: applyAmount } } });
+              // CR Accounts Receivable: crediting an asset REDUCES it
               await tx.account.update({ where: { id: arAccount.id }, data: { currentBalance: { decrement: applyAmount } } });
             }
           }
@@ -2199,12 +2556,102 @@ export const paymentEntryController = {
   },
   async remove(req: Request, res: Response) {
     try {
-      const entry = await prisma.journalEntry.findUnique({ where: { id: req.params.id } });
+      const entry = await prisma.journalEntry.findUnique({
+        where: { id: req.params.id },
+        include: { lines: true },
+      });
       if (!entry || entry.referenceType !== 'PAYMENT_ENTRY') {
         return res.status(404).json({ success: false, error: 'Not found' });
       }
-      await prisma.journalEntry.delete({ where: { id: req.params.id } });
-      res.json({ success: true, message: 'Deleted' });
+
+      const meta = parsePaymentMeta(entry.notes);
+
+      await prisma.$transaction(async (tx) => {
+        // 1. Reverse Account.currentBalance for each journal line
+        for (const line of entry.lines || []) {
+          const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+          if (Math.abs(netAmount) > 0.001) {
+            await tx.account.update({
+              where: { id: line.accountId },
+              data: { currentBalance: { decrement: netAmount } },
+            });
+          }
+        }
+
+        // 2. Reverse BankAccount balance + delete BankTransaction
+        const bankTxns = await tx.bankTransaction.findMany({
+          where: { documentRef: entry.entryNumber, documentType: 'PAYMENT' },
+        });
+        for (const bt of bankTxns) {
+          const reverseAmount = bt.type === 'CREDIT' ? -bt.amount : bt.amount;
+          await tx.bankAccount.update({
+            where: { id: bt.bankAccountId },
+            data: { currentBalance: { increment: reverseAmount } },
+          });
+          await tx.bankTransaction.delete({ where: { id: bt.id } });
+        }
+
+        // 3. Reverse customer balance
+        if (meta.clientId && entry.totalDebit > 0) {
+          await tx.customer.update({
+            where: { id: meta.clientId },
+            data: { totalPaid: { decrement: entry.totalDebit }, outstandingBalance: { increment: entry.totalDebit } },
+          });
+        }
+
+        // 4. Reverse invoice paidAmount/status
+        if (meta.invoiceId) {
+          const invoice = await tx.salesInvoice.findUnique({ where: { id: meta.invoiceId } });
+          if (invoice) {
+            const newPaid = Math.max(0, (invoice.paidAmount || 0) - entry.totalDebit);
+            const newBalance = (invoice.totalAmount || 0) - newPaid;
+            const newStatus = newPaid <= 0.01 ? (invoice.status === 'PAID' || invoice.status === 'PARTIAL' ? 'INVOICED' : invoice.status) : newBalance <= 0.01 ? 'PAID' : 'PARTIAL';
+            await tx.salesInvoice.update({
+              where: { id: meta.invoiceId },
+              data: { paidAmount: newPaid, balanceDue: Math.max(0, newBalance), status: newStatus },
+            });
+          }
+        }
+
+        // 5. Reverse advance application
+        if (meta.appliedAdvances && meta.appliedAdvances.length > 0) {
+          for (const adv of meta.appliedAdvances) {
+            const advance = await tx.clientAdvance.findUnique({ where: { id: adv.advanceId } });
+            if (!advance) continue;
+            const newUsed = Math.max(0, (advance.usedAmount || 0) - (adv.amount || 0));
+            const newRemaining = (advance.amount || 0) - newUsed;
+            const newStatus = newUsed <= 0.01 ? 'ACTIVE' : newRemaining <= 0.01 ? 'USED' : 'PARTIAL';
+            await tx.clientAdvance.update({
+              where: { id: adv.advanceId },
+              data: { usedAmount: newUsed, remainingAmount: Math.max(0, newRemaining), status: newStatus },
+            });
+          }
+
+          // Delete ADVANCE_APPLICATION journal entries linked to this payment
+          const advJournals = await tx.journalEntry.findMany({
+            where: { referenceType: 'ADVANCE_APPLICATION', reference: entry.entryNumber },
+            include: { lines: true },
+          });
+          for (const advJE of advJournals) {
+            // Reverse advance journal line balances
+            for (const line of advJE.lines || []) {
+              const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+              if (Math.abs(netAmount) > 0.001) {
+                await tx.account.update({
+                  where: { id: line.accountId },
+                  data: { currentBalance: { decrement: netAmount } },
+                });
+              }
+            }
+            await tx.journalEntry.delete({ where: { id: advJE.id } });
+          }
+        }
+
+        // 6. Delete the payment entry journal
+        await tx.journalEntry.delete({ where: { id: req.params.id } });
+      });
+
+      res.json({ success: true, message: 'Deleted and all accounting reversed' });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }

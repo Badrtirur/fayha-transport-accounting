@@ -143,7 +143,6 @@ crudRoutes('/salesmen', salesmanController);
 crudRoutes('/job-references', jobReferenceController);
 router.post('/sales-invoices/:id/send', authenticate, salesInvoiceController.send);
 router.post('/sales-invoices/:id/mark-invoiced', authenticate, salesInvoiceController.markAsInvoiced);
-router.post('/sales-invoices/:id/receive-payment', authenticate, salesInvoiceController.receivePayment);
 crudRoutes('/sales-invoices', salesInvoiceController);
 crudRoutes('/invoice-services', invoiceServiceController);
 router.get('/client-advances/by-client/:clientId', authenticate, clientAdvanceController.getByClient);
