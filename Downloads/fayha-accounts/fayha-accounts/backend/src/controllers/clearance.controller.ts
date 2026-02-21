@@ -2077,34 +2077,32 @@ export const paymentEntryController = {
           });
         }
 
-        // Mark linked sales invoice as PAID
+        // Mark linked sales invoice as PAID/PARTIAL
         if (invoiceId) {
-          try {
-            const invoice = await tx.salesInvoice.findUnique({ where: { id: invoiceId } });
-            if (invoice && invoice.status !== 'PAID') {
-              const paymentAmount = drSum;
-              const newPaid = (invoice.paidAmount || 0) + paymentAmount;
-              const newBalance = Math.max(0, (invoice.totalAmount || 0) - newPaid);
-              const newStatus = newBalance <= 0.01 ? 'PAID' : 'PARTIAL';
+          const invoice = await tx.salesInvoice.findUnique({ where: { id: invoiceId } });
+          if (invoice && invoice.status !== 'PAID') {
+            const paymentAmount = drSum;
+            const newPaid = (invoice.paidAmount || 0) + paymentAmount;
+            const newBalance = Math.max(0, (invoice.totalAmount || 0) - newPaid);
+            const newStatus = newBalance <= 0.01 ? 'PAID' : 'PARTIAL';
 
-              await tx.salesInvoice.update({
-                where: { id: invoiceId },
-                data: {
-                  paidAmount: newPaid,
-                  balanceDue: newBalance,
-                  status: newStatus,
-                },
+            await tx.salesInvoice.update({
+              where: { id: invoiceId },
+              data: {
+                paidAmount: newPaid,
+                balanceDue: newBalance,
+                status: newStatus,
+              },
+            });
+
+            // Also update customer balance from invoice's clientId if not already done above
+            if (invoice.clientId && invoice.clientId !== clientId) {
+              await tx.customer.update({
+                where: { id: invoice.clientId },
+                data: { totalPaid: { increment: paymentAmount }, outstandingBalance: { decrement: paymentAmount } },
               });
-
-              // Also update customer balance for payment received against invoice
-              if (invoice.clientId && !clientId) {
-                await tx.customer.update({
-                  where: { id: invoice.clientId },
-                  data: { totalPaid: { increment: paymentAmount }, outstandingBalance: { decrement: paymentAmount } },
-                });
-              }
             }
-          } catch (err: any) { console.error('Invoice update failed:', err?.message || err); }
+          }
         }
 
         // Apply client advances if provided
