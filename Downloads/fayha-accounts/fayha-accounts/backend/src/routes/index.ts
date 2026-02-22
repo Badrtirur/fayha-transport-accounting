@@ -108,6 +108,7 @@ router.post('/banks', authenticate, bankController.create);
 router.put('/banks/:id', authenticate, bankController.update);
 router.delete('/banks/:id', authenticate, bankController.delete);
 router.post('/banks/:id/reconcile', authenticate, bankController.reconcile);
+router.post('/banks/repair-payment-types', authenticate, bankController.repairPaymentTransactionTypes);
 
 // ==================== CUSTOMERS ====================
 router.get('/customers', authenticate, customerController.getAll);

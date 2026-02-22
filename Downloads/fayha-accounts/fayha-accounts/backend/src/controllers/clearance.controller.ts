@@ -549,7 +549,7 @@ export const salesInvoiceController = {
         }
 
         return invoice;
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.status(201).json({ success: true, data: invoice });
     } catch (error: any) {
@@ -600,6 +600,9 @@ export const salesInvoiceController = {
 
       const oldTotal = existing.totalAmount || 0;
       const amountChanged = data.totalAmount !== undefined && Math.abs(data.totalAmount - oldTotal) > 0.01;
+
+      // Pre-generate journal entry number outside transaction (SQLite single-writer lock)
+      const preGenJeNumber = amountChanged ? await generateNumber('SALES_INVOICE', 'JE-INV') : '';
 
       const result = await prisma.$transaction(async (tx) => {
         // If totalAmount changed, reverse old journal and create new one
@@ -672,7 +675,7 @@ export const salesInvoiceController = {
             }
 
             if (arAccount && revenueAccount) {
-              const entryNumber = await generateNumber('SALES_INVOICE', 'JE-INV');
+              const entryNumber = preGenJeNumber;
               const journalLines: any[] = [
                 { lineNumber: 1, accountId: arAccount.id, description: `Accounts Receivable - ${invoice.client?.name || ''} - ${invoice.invoiceNumber}`, debitAmount: newTotalAmt, creditAmount: 0, customerId: clientId || undefined },
               ];
@@ -740,7 +743,7 @@ export const salesInvoiceController = {
           });
           return invoice;
         }
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, data: result });
     } catch (error: any) {
@@ -786,7 +789,7 @@ export const salesInvoiceController = {
         }
 
         return inv;
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, data: updated });
     } catch (error: any) {
@@ -837,7 +840,7 @@ export const salesInvoiceController = {
         // 3. Delete invoice items then the invoice
         await tx.salesInvoiceItem.deleteMany({ where: { salesInvoiceId: invoice.id } });
         await tx.salesInvoice.delete({ where: { id: invoice.id } });
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, message: 'Deleted and all accounting reversed' });
     } catch (error: any) {
@@ -886,6 +889,9 @@ export const clientAdvanceController = {
 
       // Extract accountId (not a DB column)
       const selectedAccountId = req.body.accountId || null;
+
+      // Pre-generate journal entry number outside transaction (SQLite single-writer lock)
+      const preGenAdvJeNumber = await generateNumber('CLIENT_ADVANCE', 'JE-ADV');
 
       const result = await prisma.$transaction(async (tx) => {
         // 1. Reverse old journal entry and account balances
@@ -945,7 +951,7 @@ export const clientAdvanceController = {
           if (!advLiab) advLiab = await tx.account.findFirst({ where: { OR: [{ type: 'LIABILITY' }, { name: { contains: 'Liability' } }], isActive: true } });
 
           if (debitAccountId && advLiab) {
-            const entryNumber = await generateNumber('CLIENT_ADVANCE', 'JE-ADV');
+            const entryNumber = preGenAdvJeNumber;
             await tx.journalEntry.create({
               data: {
                 entryNumber, date: advance.date || new Date(),
@@ -979,7 +985,7 @@ export const clientAdvanceController = {
         }
 
         return advance;
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, data: result });
     } catch (error: any) {
@@ -1032,7 +1038,7 @@ export const clientAdvanceController = {
 
         // 3. Delete the advance record
         await tx.clientAdvance.delete({ where: { id } });
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, message: 'Deleted and all accounting reversed' });
     } catch (error: any) {
@@ -1233,7 +1239,7 @@ export const clientAdvanceController = {
         }
 
         return advance;
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.status(201).json({ success: true, data: advance });
     } catch (error: any) {
@@ -2165,8 +2171,16 @@ export const paymentEntryController = {
 
       const entryNumber = await generateNumber('PAYMENT_ENTRY', 'PE');
 
-      const entry = await prisma.$transaction(async (tx) => {
+      // Pre-generate advance journal entry numbers OUTSIDE the transaction
+      // (generateNumber uses global prisma which conflicts with SQLite's single-writer inside tx)
+      const advJeNumbers: string[] = [];
+      if (appliedAdvances && appliedAdvances.length > 0) {
+        for (let i = 0; i < appliedAdvances.length; i++) {
+          advJeNumbers.push(await generateNumber('PAYMENT_ENTRY', 'PE-ADV'));
+        }
+      }
 
+      const entry = await prisma.$transaction(async (tx) => {
         // Find a default account for lines without specific account
         let defaultAccount = await tx.account.findFirst({ where: { isActive: true } });
         if (!defaultAccount) {
@@ -2244,8 +2258,21 @@ export const paymentEntryController = {
 
         // Update BankAccount + BankTransaction if payment method is Bank/Cheque
         if ((method === 'Bank' || method === 'Cheque') && ledgerAccountId) {
-          // Find linked bank account by its accountId
-          const linkedBank = await tx.bankAccount.findFirst({ where: { accountId: ledgerAccountId, isActive: true } });
+          // Find linked bank account by its accountId, or fallback to name matching
+          let linkedBank = await tx.bankAccount.findFirst({ where: { accountId: ledgerAccountId, isActive: true } });
+          if (!linkedBank) {
+            // Try to link by matching the ledger account name to bank name
+            const ledgerAccount = await tx.account.findUnique({ where: { id: ledgerAccountId }, select: { name: true } });
+            if (ledgerAccount?.name) {
+              linkedBank = await tx.bankAccount.findFirst({
+                where: { bankName: { contains: ledgerAccount.name.replace(/\s*(bank|account|cash)\s*/gi, '').trim() }, isActive: true },
+              });
+              // If found, link it for future lookups
+              if (linkedBank) {
+                await tx.bankAccount.update({ where: { id: linkedBank.id }, data: { accountId: ledgerAccountId } });
+              }
+            }
+          }
           if (linkedBank) {
             // Find the bank line - it's the line with ledgerAccountId
             const bankLine = journalLines.find((l: any) => l.accountId === ledgerAccountId);
@@ -2275,9 +2302,19 @@ export const paymentEntryController = {
             // Fallback: try to find default bank
             const defaultBank = await tx.bankAccount.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
             if (defaultBank) {
-              // Use total amount with sign based on entry type
-              const isReceipt = entryType === 'Receive' || entryType === 'Receipt';
-              const bankAmount = drSum; // drSum === crSum since balanced
+              // Determine direction from actual journal lines: if ledger account has DR > CR, money came IN (CREDIT)
+              const bankLine = journalLines.find((l: any) => l.accountId === ledgerAccountId);
+              let isReceipt: boolean;
+              let bankAmount: number;
+              if (bankLine) {
+                const netAmt = (bankLine.debitAmount || 0) - (bankLine.creditAmount || 0);
+                isReceipt = netAmt >= 0;
+                bankAmount = Math.abs(netAmt);
+              } else {
+                // Final fallback: check entryType
+                isReceipt = entryType === 'Receive' || entryType === 'Receipt' || entryType === 'Payment';
+                bankAmount = drSum;
+              }
               await tx.bankAccount.update({
                 where: { id: defaultBank.id },
                 data: { currentBalance: { increment: isReceipt ? bankAmount : -bankAmount } },
@@ -2367,7 +2404,8 @@ export const paymentEntryController = {
             },
           });
 
-          for (const adv of appliedAdvances) {
+          for (let advIdx = 0; advIdx < appliedAdvances.length; advIdx++) {
+            const adv = appliedAdvances[advIdx];
             const advance = await tx.clientAdvance.findUnique({ where: { id: adv.advanceId } });
             if (!advance) continue;
 
@@ -2385,7 +2423,7 @@ export const paymentEntryController = {
 
             // Create additional journal entry for advance application
             if (advanceLiabilityAccount && arAccount) {
-              const advJeNumber = await generateNumber('PAYMENT_ENTRY', 'PE-ADV');
+              const advJeNumber = advJeNumbers[advIdx] || `PE-ADV-${Date.now()}`;
               await tx.journalEntry.create({
                 data: {
                   entryNumber: advJeNumber,
@@ -2416,7 +2454,7 @@ export const paymentEntryController = {
         }
 
         return entry;
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.status(201).json({ success: true, data: formatPaymentEntry(entry) });
     } catch (error: any) {
@@ -2530,7 +2568,7 @@ export const paymentEntryController = {
 
         // 6. Delete the payment entry journal
         await tx.journalEntry.delete({ where: { id: req.params.id } });
-      });
+      }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, message: 'Deleted and all accounting reversed' });
     } catch (error: any) {

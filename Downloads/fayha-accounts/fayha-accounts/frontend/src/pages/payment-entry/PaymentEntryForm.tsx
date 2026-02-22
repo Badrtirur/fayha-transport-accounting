@@ -56,7 +56,7 @@ const PaymentEntryForm: React.FC = () => {
   const [documentDate, setDocumentDate] = useState('');
   const [documentNumber, setDocumentNumber] = useState('');
   const [method, setMethod] = useState<PaymentMethodType>('Cash');
-  const entryType = 'Payment';
+  const entryType = 'Receipt';
   const [ledgerAccountId, setLedgerAccountId] = useState('');
   const [lines, setLines] = useState<FormLine[]>([
     { id: generateLineId(), paymentStatus: '', accountId: '', crAmount: 0, drAmount: 0 },
@@ -87,7 +87,7 @@ const PaymentEntryForm: React.FC = () => {
       // Job References
       const jrs = Array.isArray(jrList) ? jrList : [];
       setAllJobRefs(jrs);
-      setJobRefOptions(jrs.map((j: any) => ({ value: j.id, label: j.jobRefNo || j.jobNumber || j.id })));
+      setJobRefOptions(jrs.map((j: any) => ({ value: j.id, label: `${j.jobRefNo || j.jobNumber || j.id} — [${j.status || 'N/A'}]` })));
 
       // Accounts — split into ledger accounts and operation accounts
       const accounts = Array.isArray(accountList) ? accountList : [];
@@ -120,19 +120,31 @@ const PaymentEntryForm: React.FC = () => {
     return ids;
   }, [existingPayments]);
 
-  // Filter job refs by selected client — reset child selections when client changes
+  // Filter job refs by selected client — exclude jobs whose invoices are all fully paid
   useEffect(() => {
+    const formatJR = (j: any) => {
+      const refNo = j.jobRefNo || j.jobNumber || j.id;
+      return { value: j.id, label: `${refNo} — [${j.status || 'N/A'}]` };
+    };
+    // A job should be hidden if ALL its invoices are PAID and have payment entries
+    const hasUnpaidInvoice = (j: any) => {
+      const jobInvs = allInvoices.filter((inv: any) => inv.jobReferenceId === j.id);
+      if (jobInvs.length === 0) return true; // no invoices yet — still show
+      return jobInvs.some((inv: any) => inv.status !== 'PAID' && !paidInvoiceIds.has(inv.id));
+    };
     if (clientId) {
-      const filtered = allJobRefs.filter((j: any) => j.clientId === clientId);
-      setJobRefOptions(filtered.map((j: any) => ({ value: j.id, label: j.jobRefNo || j.jobNumber || j.id })));
+      const filtered = allJobRefs
+        .filter((j: any) => j.clientId === clientId)
+        .filter(hasUnpaidInvoice);
+      setJobRefOptions(filtered.map(formatJR));
       // Reset child selections when client changes
       setJobRefId('');
       setInvoiceId('');
       setCostItemIds([]);
     } else {
-      setJobRefOptions(allJobRefs.map((j: any) => ({ value: j.id, label: j.jobRefNo || j.jobNumber || j.id })));
+      setJobRefOptions(allJobRefs.filter(hasUnpaidInvoice).map(formatJR));
     }
-  }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, allInvoices, paidInvoiceIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch client advances when client changes
   useEffect(() => {
@@ -152,53 +164,88 @@ const PaymentEntryForm: React.FC = () => {
     }
   }, [clientId]);
 
-  // Filter invoices by selected job reference — exclude already-paid invoices
+  // Auto-detect invoice from job ref — auto-select invoice + all cost items
   useEffect(() => {
-    const excludePaid = (inv: any) => !paidInvoiceIds.has(inv.id);
-    const toOption = (inv: any) => ({ value: inv.id, label: inv.invoiceNumber || inv.id });
-
-    if (jobRefId) {
-      const filtered = allInvoices.filter((inv: any) => inv.jobReferenceId === jobRefId).filter(excludePaid);
-      if (filtered.length > 0) {
-        setInvoiceOptions(filtered.map(toOption));
-      } else {
-        const clientInvs = clientId
-          ? allInvoices.filter((inv: any) => inv.clientId === clientId).filter(excludePaid)
-          : allInvoices.filter(excludePaid);
-        setInvoiceOptions(clientInvs.map(toOption));
-      }
-    } else if (clientId) {
-      const clientInvs = allInvoices.filter((inv: any) => inv.clientId === clientId).filter(excludePaid);
-      setInvoiceOptions(clientInvs.map(toOption));
-    } else {
-      setInvoiceOptions(allInvoices.filter(excludePaid).map(toOption));
+    if (!jobRefId) {
+      setInvoiceId('');
+      setCostItemIds([]);
+      setInvoiceOptions([]);
+      setCostOptions([]);
+      return;
     }
-    setInvoiceId('');
-    setCostItemIds([]);
+
+    const isPayable = (inv: any) =>
+      !paidInvoiceIds.has(inv.id) &&
+      (inv.status === 'INVOICED' || inv.status === 'PARTIAL');
+
+    const jobInvoices = allInvoices
+      .filter((inv: any) => inv.jobReferenceId === jobRefId)
+      .filter(isPayable);
+
+    if (jobInvoices.length === 0) {
+      // Fallback: show client invoices if job has none
+      const clientInvs = clientId
+        ? allInvoices.filter((inv: any) => inv.clientId === clientId).filter(isPayable)
+        : [];
+      setInvoiceOptions(clientInvs.map((inv: any) => ({
+        value: inv.id,
+        label: `${inv.invoiceNumber || inv.id} — ${inv.status} — SAR ${((inv.balanceDue ?? inv.totalAmount) || 0).toLocaleString('en', { minimumFractionDigits: 2 })}`,
+      })));
+      setInvoiceId('');
+      setCostItemIds([]);
+      return;
+    }
+
+    // Auto-select the first unpaid invoice for this job
+    const autoInv = jobInvoices[0];
+    setInvoiceId(autoInv.id);
+    setInvoiceOptions(jobInvoices.map((inv: any) => ({
+      value: inv.id,
+      label: `${inv.invoiceNumber || inv.id} — ${inv.status} — SAR ${((inv.balanceDue ?? inv.totalAmount) || 0).toLocaleString('en', { minimumFractionDigits: 2 })}`,
+    })));
+
+    // Auto-select ALL cost items from the invoice
+    const items = autoInv.items || [];
+    if (items.length > 0) {
+      setCostOptions(items.map((item: any) => ({
+        value: item.id,
+        label: `${item.nameEn || item.description || 'Service'} — ${fmtSAR(item.totalAmount || item.amount || 0)}`,
+      })));
+      setCostItemIds(items.map((item: any) => item.id));
+    } else {
+      setCostOptions([{
+        value: autoInv.id,
+        label: `${autoInv.invoiceNumber || autoInv.id} — ${fmtSAR(autoInv.totalAmount || 0)}`,
+      }]);
+      setCostItemIds([autoInv.id]);
+    }
   }, [jobRefId, clientId, allInvoices, paidInvoiceIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build cost item options from selected invoice's line items
-  useEffect(() => {
-    if (invoiceId) {
-      const inv = allInvoices.find((i: any) => i.id === invoiceId);
-      const items = inv?.items || [];
-      if (items.length > 0) {
-        setCostOptions(items.map((item: any) => ({
-          value: item.id,
-          label: `${item.nameEn || item.description || 'Service'} — ${fmtSAR(item.totalAmount || item.amount || 0)}`,
-        })));
-      } else {
-        // If no line items, show the invoice itself as the cost
-        setCostOptions([{
-          value: inv?.id || invoiceId,
-          label: `${inv?.invoiceNumber || invoiceId} — ${fmtSAR(inv?.totalAmount || 0)}`,
-        }]);
-      }
-    } else {
+  // When invoice changes (user manually switches between multiple invoices for a job)
+  // rebuild cost items and auto-select all
+  const handleInvoiceChange = (newInvoiceId: string) => {
+    setInvoiceId(newInvoiceId);
+    if (!newInvoiceId) {
       setCostOptions([]);
+      setCostItemIds([]);
+      return;
     }
-    setCostItemIds([]);
-  }, [invoiceId, allInvoices]); // eslint-disable-line react-hooks/exhaustive-deps
+    const inv = allInvoices.find((i: any) => i.id === newInvoiceId);
+    const items = inv?.items || [];
+    if (items.length > 0) {
+      setCostOptions(items.map((item: any) => ({
+        value: item.id,
+        label: `${item.nameEn || item.description || 'Service'} — ${fmtSAR(item.totalAmount || item.amount || 0)}`,
+      })));
+      setCostItemIds(items.map((item: any) => item.id));
+    } else {
+      setCostOptions([{
+        value: inv?.id || newInvoiceId,
+        label: `${inv?.invoiceNumber || newInvoiceId} — ${fmtSAR(inv?.totalAmount || 0)}`,
+      }]);
+      setCostItemIds([inv?.id || newInvoiceId]);
+    }
+  };
 
   // ── Derived: selected invoice object, selected cost items, totals ──
   const selectedInvoice = useMemo(
@@ -504,28 +551,44 @@ const PaymentEntryForm: React.FC = () => {
           </div>
         )}
 
-        {/* Row 2: Invoice, Cost Item (2-col) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <SearchableSelect
-            label="Invoice"
-            required
-            options={invoiceOptions}
-            value={invoiceId}
-            onChange={setInvoiceId}
-            placeholder={jobRefId ? 'Select invoice...' : 'Select job ref first...'}
-          />
-          <SearchableSelect
-            label="Select Cost For Invoice"
-            required
-            options={costOptions}
-            value=""
-            onChange={() => {}}
-            multi
-            multiValue={costItemIds}
-            onMultiChange={setCostItemIds}
-            placeholder={invoiceId ? 'Select cost items (or Select All)...' : 'Select invoice first...'}
-          />
-        </div>
+        {/* Auto-detected Invoice & Cost Items */}
+        {jobRefId && invoiceId && selectedInvoice && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-600" />
+                <div>
+                  <p className="text-sm font-bold text-blue-900">
+                    Invoice: {selectedInvoice.invoiceNumber} — {fmtSAR(selectedInvoice.balanceDue ?? selectedInvoice.totalAmount ?? 0)} due
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    {costItemIds.length} cost item{costItemIds.length !== 1 ? 's' : ''} auto-selected | Status: {selectedInvoice.status}
+                  </p>
+                </div>
+              </div>
+              {invoiceOptions.length > 1 && (
+                <div className="w-64">
+                  <SearchableSelect
+                    options={invoiceOptions}
+                    value={invoiceId}
+                    onChange={handleInvoiceChange}
+                    placeholder="Switch invoice..."
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {jobRefId && !invoiceId && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              <p className="text-sm font-semibold text-amber-800">
+                No unpaid invoice found for this job reference.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Duplicate Warning ── */}
         {existingPaymentForInvoice && (
@@ -583,13 +646,18 @@ const PaymentEntryForm: React.FC = () => {
                 </div>
               </div>
 
-              {/* Invoice Details */}
+              {/* Invoice & Job Details */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
                   <FileText className="h-3.5 w-3.5" /> Invoice Details
                 </div>
                 <div className="bg-white rounded-lg p-3 border border-slate-100 space-y-1.5">
                   <p className="text-sm font-bold text-slate-900">{selectedInvoice.invoiceNumber}</p>
+                  {selectedJobRef && (
+                    <p className="text-xs text-blue-700 font-semibold">
+                      Job Ref: {(selectedJobRef as any).jobRefNo || (selectedJobRef as any).jobNumber}
+                    </p>
+                  )}
                   <p className="text-xs text-slate-500">
                     Date: {selectedInvoice.invoiceDate ? new Date(selectedInvoice.invoiceDate).toLocaleDateString() : '—'}
                   </p>
