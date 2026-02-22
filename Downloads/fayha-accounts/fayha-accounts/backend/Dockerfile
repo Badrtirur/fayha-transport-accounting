@@ -1,4 +1,6 @@
-FROM node:18-alpine AS build
+FROM node:18-slim AS build
+
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -11,12 +13,14 @@ RUN npx prisma generate
 COPY . .
 RUN npm run build
 
-FROM node:18-alpine
+FROM node:18-slim
+
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
