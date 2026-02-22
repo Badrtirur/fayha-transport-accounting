@@ -18,13 +18,17 @@ const app = express();
 // Security
 app.use(helmet());
 
-// CORS - allow any localhost port in development
+// CORS - allow localhost in dev, configured origins in production
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || origin.match(/^https?:\/\/localhost(:\d+)?$/)) {
       callback(null, true);
+    } else if (config.corsOrigin && origin === config.corsOrigin) {
+      callback(null, true);
+    } else if (origin?.endsWith('.railway.app') || origin?.endsWith('.up.railway.app')) {
+      callback(null, true);
     } else {
-      callback(null, config.corsOrigin);
+      callback(null, config.corsOrigin || true);
     }
   },
   credentials: true,

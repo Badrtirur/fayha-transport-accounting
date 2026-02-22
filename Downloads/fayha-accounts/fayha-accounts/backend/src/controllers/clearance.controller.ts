@@ -23,8 +23,10 @@ function crud(model: any, includes?: any, orderBy?: any, opts?: CrudOptions) {
       if (body[key] !== undefined) data[key] = body[key];
     }
     // Parse date fields
-    if (data.date && typeof data.date === 'string') data.date = new Date(data.date);
-    if (data.dueDate && typeof data.dueDate === 'string') data.dueDate = new Date(data.dueDate);
+    const dateFields = ['date', 'dueDate', 'quoteDate', 'validUntil', 'etd', 'eta', 'atd', 'ata', 'completedAt', 'purchaseDate', 'nextServiceDate'];
+    for (const df of dateFields) {
+      if (data[df] && typeof data[df] === 'string') data[df] = new Date(data[df]);
+    }
     // Nullify empty FK strings
     for (const fk of ['vendorId', 'clientId', 'jobRefId', 'bankAccountId', 'accountId']) {
       if (data[fk] !== undefined && (!data[fk] || (typeof data[fk] === 'string' && data[fk].trim().length === 0))) {

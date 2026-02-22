@@ -1,0 +1,286 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   Fayha Clearance - Enterprise UI System
+   Premium Design for 500+ Employees
+   ======================================== */
+
+:root {
+  --color-primary: #4f46e5;
+  --color-primary-light: #6366f1;
+  --color-secondary: #0f172a;
+  --color-accent: #10b981;
+  --color-accent-light: #34d399;
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+  --sidebar-width: 280px;
+  --header-height: 64px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+}
+
+/* ===== Base Styles ===== */
+body {
+  font-family: 'DM Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #f8fafc;
+  color: #0f172a;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Arabic text */
+[dir="rtl"], .arabic {
+  font-family: 'Noto Sans Arabic', sans-serif;
+}
+
+/* Monospace for numbers/codes */
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ===== Custom Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ===== Glass Morphism Components ===== */
+@layer components {
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20 shadow-glass;
+  }
+
+  .glass-card-dark {
+    @apply bg-slate-900/80 backdrop-blur-xl border border-white/10;
+  }
+
+  .card-premium {
+    @apply bg-white rounded-2xl shadow-card border border-slate-100/80 transition-all duration-300 hover:shadow-card-hover hover:border-slate-200/80 hover:-translate-y-0.5;
+  }
+
+  .card-interactive {
+    @apply bg-white rounded-2xl shadow-card border border-slate-100/80 transition-all duration-300 hover:shadow-card-hover hover:border-emerald-200/60 hover:-translate-y-1 cursor-pointer;
+  }
+
+  /* Premium Buttons */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 shadow-lg shadow-emerald-500/25 hover:shadow-xl hover:shadow-emerald-500/30 active:scale-[0.98];
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 px-5 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 transition-all duration-200 hover:border-slate-300 hover:shadow-sm active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-500 hover:from-red-700 hover:to-red-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 shadow-lg shadow-red-500/25 active:scale-[0.98];
+  }
+
+  /* Premium Input */
+  .input-premium {
+    @apply w-full px-4 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-sm placeholder:text-slate-400 focus:bg-white focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none transition-all duration-200;
+  }
+
+  /* Status Badges */
+  .badge-success {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100;
+  }
+
+  .badge-warning {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-100;
+  }
+
+  .badge-danger {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-100;
+  }
+
+  .badge-info {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100;
+  }
+
+  .badge-neutral {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200;
+  }
+
+  /* Premium Table */
+  .table-premium {
+    @apply min-w-full;
+  }
+
+  .table-premium thead {
+    @apply bg-slate-50/80;
+  }
+
+  .table-premium thead th {
+    @apply px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider;
+  }
+
+  .table-premium tbody tr {
+    @apply border-b border-slate-100/80 hover:bg-slate-50/50 transition-colors duration-150;
+  }
+
+  .table-premium tbody td {
+    @apply px-6 py-4;
+  }
+
+  /* KPI Stat Card */
+  .stat-card {
+    @apply relative overflow-hidden bg-white rounded-2xl p-6 shadow-card border border-slate-100/80 transition-all duration-300 hover:shadow-card-hover;
+  }
+
+  .stat-card::before {
+    content: '';
+    @apply absolute top-0 right-0 w-32 h-32 rounded-full opacity-5;
+    background: radial-gradient(circle, currentColor, transparent);
+    transform: translate(30%, -30%);
+  }
+
+  /* Section Header */
+  .section-header {
+    @apply flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6;
+  }
+
+  /* Sidebar Nav Item */
+  .nav-item {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200;
+  }
+
+  .nav-item-active {
+    @apply bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/20;
+  }
+
+  .nav-item-inactive {
+    @apply text-slate-400 hover:bg-white/5 hover:text-white;
+  }
+
+  /* Live Dot Indicator */
+  .dot-live {
+    @apply relative;
+  }
+
+  .dot-live::after {
+    content: '';
+    @apply absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  /* Gradient Text */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-teal-400;
+  }
+
+  /* Progress Bar */
+  .progress-bar {
+    @apply h-2 rounded-full bg-slate-100 overflow-hidden;
+  }
+
+  .progress-bar-fill {
+    @apply h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-1000 ease-out;
+  }
+}
+
+/* ===== Animations ===== */
+@layer utilities {
+  .animate-in {
+    animation: fadeInUp 0.5s ease-out forwards;
+  }
+
+  .stagger-1 { animation-delay: 0.05s; }
+  .stagger-2 { animation-delay: 0.1s; }
+  .stagger-3 { animation-delay: 0.15s; }
+  .stagger-4 { animation-delay: 0.2s; }
+  .stagger-5 { animation-delay: 0.25s; }
+  .stagger-6 { animation-delay: 0.3s; }
+
+  .hover-lift {
+    @apply transition-all duration-300;
+  }
+  .hover-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px -8px rgba(0,0,0,0.12);
+  }
+}
+
+/* ===== Skeleton Loading ===== */
+.skeleton {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ===== Table styles ===== */
+table {
+  border-collapse: collapse;
+}
+
+/* ===== Tooltip ===== */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 6px 12px;
+  background: #0f172a;
+  color: white;
+  font-size: 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+/* ===== Print styles ===== */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .card-premium, .stat-card { box-shadow: none; border: 1px solid #e2e8f0; }
+}
+
+/* ===== Custom Focus Ring ===== */
+*:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ===== Selection Color ===== */
+::selection {
+  background-color: #d1fae5;
+  color: #064e3b;
+}
