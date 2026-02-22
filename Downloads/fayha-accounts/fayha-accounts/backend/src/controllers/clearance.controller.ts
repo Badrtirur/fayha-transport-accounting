@@ -357,10 +357,8 @@ export const salesInvoiceController = {
         if (data[f] !== undefined) data[f] = Number(data[f]) || 0;
       }
 
-      // Compute balanceDue
-      if (data.balanceDue === undefined || data.balanceDue === 0) {
-        data.balanceDue = (data.totalAmount || 0) - (data.paidAmount || 0);
-      }
+      // Always compute balanceDue from totalAmount and paidAmount (never trust client value)
+      data.balanceDue = (data.totalAmount || 0) - (data.paidAmount || 0);
 
       // Auto-generate invoice number (sequential INV-YYYY-NNNN)
       if (!data.invoiceNumber) {
@@ -564,9 +562,9 @@ export const salesInvoiceController = {
       const existing = await prisma.salesInvoice.findUnique({ where: { id } });
       if (!existing) return res.status(404).json({ success: false, error: 'Not found' });
 
-      // Prevent editing paid invoices
-      if (existing.status === 'PAID') {
-        return res.status(400).json({ success: false, error: 'Cannot edit a fully paid invoice' });
+      // Prevent editing paid or partially paid invoices
+      if (existing.status === 'PAID' || existing.status === 'PARTIAL') {
+        return res.status(400).json({ success: false, error: `Cannot edit a ${existing.status.toLowerCase()} invoice. Reverse payments first.` });
       }
 
       const { items, ...rest } = req.body;
@@ -609,15 +607,16 @@ export const salesInvoiceController = {
           const userId = (req as any).user?.id;
 
           // Reverse old journal entries
+          // Convention A: decrement by max(debit, credit) for each line
           const oldJournals = await tx.journalEntry.findMany({
             where: { referenceType: 'SALES_INVOICE', reference: existing.invoiceNumber },
             include: { lines: true },
           });
           for (const je of oldJournals) {
             for (const line of je.lines || []) {
-              const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
-              if (Math.abs(netAmount) > 0.001) {
-                await tx.account.update({ where: { id: line.accountId }, data: { currentBalance: { decrement: netAmount } } });
+              const amount = Math.max(line.debitAmount || 0, line.creditAmount || 0);
+              if (amount > 0.001) {
+                await tx.account.update({ where: { id: line.accountId }, data: { currentBalance: { decrement: amount } } });
               }
             }
             await tx.journalEntry.delete({ where: { id: je.id } });
@@ -715,7 +714,25 @@ export const salesInvoiceController = {
 
           return invoice;
         } else {
-          // No amount change - simple update
+          // No amount change - update invoice fields and line items if provided
+          if (items) {
+            await tx.salesInvoiceItem.deleteMany({ where: { salesInvoiceId: id } });
+            const processedItems = (items || []).map((item: any, idx: number) => ({
+              salesInvoiceId: id,
+              lineNumber: idx + 1,
+              serviceId: (item.serviceId && item.serviceId.length >= 10) ? item.serviceId : undefined,
+              nameEn: item.nameEn || item.name || '',
+              nameAr: item.nameAr || '',
+              description: item.description || '',
+              amount: Number(item.amount) || 0,
+              vatRate: Number(item.vatRate || item.vatPercent || 0.15),
+              vatAmount: Number(item.vatAmount) || 0,
+              totalAmount: Number(item.totalAmount || item.total) || 0,
+            }));
+            if (processedItems.length > 0) {
+              await tx.salesInvoiceItem.createMany({ data: processedItems });
+            }
+          }
           const invoice = await tx.salesInvoice.update({
             where: { id },
             data,
@@ -776,182 +793,6 @@ export const salesInvoiceController = {
       res.status(500).json({ success: false, error: error.message });
     }
   },
-  async receivePayment(req: Request, res: Response) {
-    try {
-      const invoiceId = req.params.id;
-      const { paymentDate, paymentMethod, bankAccountId, reference } = req.body;
-
-      // 1. Load the invoice
-      const invoice = await prisma.salesInvoice.findUnique({
-        where: { id: invoiceId },
-        include: { client: true },
-      });
-      if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
-      if (invoice.status === 'PAID') return res.status(400).json({ success: false, error: 'Invoice is already paid' });
-      if (invoice.status === 'DRAFT') return res.status(400).json({ success: false, error: 'Invoice must be marked as INVOICED before receiving payment' });
-
-      const paymentAmount = invoice.totalAmount;
-      const userId = (req as any).user?.id;
-
-      const result = await prisma.$transaction(async (tx) => {
-        // 2. Update invoice: full payment
-        const updatedInvoice = await tx.salesInvoice.update({
-          where: { id: invoiceId },
-          data: {
-            paidAmount: paymentAmount,
-            balanceDue: 0,
-            status: 'PAID',
-          },
-          include: { client: true, items: true },
-        });
-
-        // 3. Update customer balance
-        if (invoice.clientId) {
-          await tx.customer.update({
-            where: { id: invoice.clientId },
-            data: {
-              totalPaid: { increment: paymentAmount },
-              outstandingBalance: { decrement: paymentAmount },
-            },
-          });
-        }
-
-        // 4. Find credit account (Bank or Cash)
-        let creditAccountId: string | null = null;
-
-        if ((paymentMethod === 'Bank' || paymentMethod === 'Cheque') && bankAccountId) {
-          const linkedAccount = await tx.account.findFirst({
-            where: { bankId: bankAccountId },
-          });
-          creditAccountId = linkedAccount?.id || null;
-        }
-
-        if (!creditAccountId) {
-          const cashAccount = await tx.account.findFirst({
-            where: {
-              OR: [
-                { code: { contains: 'CASH' } },
-                { name: { contains: 'Cash' } },
-                { subType: 'Cash' },
-              ],
-              isActive: true,
-            },
-          });
-          creditAccountId = cashAccount?.id || null;
-        }
-
-        // 5. Find AR account (to credit — reduce receivable)
-        const arAccount = await tx.account.findFirst({
-          where: {
-            OR: [
-              { subType: 'Accounts Receivable' },
-              { name: { contains: 'Accounts Receivable' } },
-              { name: { contains: 'Receivable' } },
-              { code: { startsWith: '1200' } },
-            ],
-            isActive: true,
-          },
-        });
-
-        // 6. Create journal entry: DR Bank/Cash, CR AR
-        if (creditAccountId && arAccount && userId) {
-          const jYear = new Date().getFullYear();
-          const jPrefix = `JE-PAY-${jYear}-`;
-          const lastJE = await tx.journalEntry.findFirst({
-            where: { entryNumber: { startsWith: jPrefix } },
-            orderBy: { entryNumber: 'desc' },
-          });
-          let jSeq = 1;
-          if (lastJE) {
-            const n = parseInt(lastJE.entryNumber.replace(jPrefix, ''), 10);
-            if (!isNaN(n)) jSeq = n + 1;
-          }
-          const entryNumber = `${jPrefix}${String(jSeq).padStart(4, '0')}`;
-          const jeDate = paymentDate ? new Date(paymentDate) : new Date();
-
-          await tx.journalEntry.create({
-            data: {
-              entryNumber,
-              date: jeDate,
-              description: `Payment Received - ${invoice.invoiceNumber} - ${invoice.client?.name || ''}`,
-              reference: invoice.invoiceNumber,
-              referenceType: 'PAYMENT_RECEIVED',
-              totalDebit: paymentAmount,
-              totalCredit: paymentAmount,
-              status: 'POSTED',
-              createdById: userId,
-              postedAt: new Date(),
-              notes: JSON.stringify({
-                salesInvoiceId: invoice.id,
-                clientId: invoice.clientId,
-                paymentMethod: paymentMethod || 'Cash',
-                bankAccountId: bankAccountId || null,
-                reference: reference || null,
-              }),
-              lines: {
-                create: [
-                  {
-                    lineNumber: 1,
-                    accountId: creditAccountId,
-                    description: `Payment Received - ${paymentMethod || 'Cash'} - ${invoice.invoiceNumber}`,
-                    debitAmount: paymentAmount,
-                    creditAmount: 0,
-                  },
-                  {
-                    lineNumber: 2,
-                    accountId: arAccount.id,
-                    description: `AR Cleared - ${invoice.client?.name || ''} - ${invoice.invoiceNumber}`,
-                    debitAmount: 0,
-                    creditAmount: paymentAmount,
-                    customerId: invoice.clientId || undefined,
-                  },
-                ],
-              },
-            },
-          });
-
-          // 7. Update ledger account balances
-          // Bank/Cash (ASSET, normal debit): +paymentAmount
-          await tx.account.update({
-            where: { id: creditAccountId },
-            data: { currentBalance: { increment: paymentAmount } },
-          });
-          // AR (ASSET, normal debit): -paymentAmount (credit reduces AR)
-          await tx.account.update({
-            where: { id: arAccount.id },
-            data: { currentBalance: { increment: -paymentAmount } },
-          });
-        }
-
-        // 8. Update BankAccount balance + create BankTransaction
-        if ((paymentMethod === 'Bank' || paymentMethod === 'Cheque') && bankAccountId) {
-          await tx.bankAccount.update({
-            where: { id: bankAccountId },
-            data: { currentBalance: { increment: paymentAmount } },
-          });
-          await tx.bankTransaction.create({
-            data: {
-              bankAccountId,
-              transactionDate: paymentDate ? new Date(paymentDate) : new Date(),
-              type: 'CREDIT',
-              description: `Payment Received - ${invoice.client?.name || ''} - ${invoice.invoiceNumber}`,
-              reference: invoice.invoiceNumber,
-              amount: paymentAmount,
-              runningBalance: 0, // will be recalculated on read
-              documentType: 'RECEIPT',
-              documentRef: reference || invoice.invoiceNumber,
-            },
-          });
-        }
-
-        return updatedInvoice;
-      });
-
-      res.json({ success: true, data: result });
-    } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  },
   async remove(req: Request, res: Response) {
     try {
       const invoice = await prisma.salesInvoice.findUnique({ where: { id: req.params.id }, include: { items: true } });
@@ -964,17 +805,18 @@ export const salesInvoiceController = {
 
       await prisma.$transaction(async (tx) => {
         // 1. Reverse journal entries and account balances
+        // Convention A: decrement by max(debit, credit) for each line
         const journals = await tx.journalEntry.findMany({
           where: { referenceType: 'SALES_INVOICE', reference: invoice.invoiceNumber },
           include: { lines: true },
         });
         for (const je of journals) {
           for (const line of je.lines || []) {
-            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
-            if (Math.abs(netAmount) > 0.001) {
+            const amount = Math.max(line.debitAmount || 0, line.creditAmount || 0);
+            if (amount > 0.001) {
               await tx.account.update({
                 where: { id: line.accountId },
-                data: { currentBalance: { decrement: netAmount } },
+                data: { currentBalance: { decrement: amount } },
               });
             }
           }
@@ -1047,17 +889,19 @@ export const clientAdvanceController = {
 
       const result = await prisma.$transaction(async (tx) => {
         // 1. Reverse old journal entry and account balances
+        // Convention A: CREATE incremented by debitAmount for DR lines and creditAmount for CR lines
+        // So reversal decrements by max(debit, credit) for each line
         const oldJournals = await tx.journalEntry.findMany({
           where: { referenceType: 'CLIENT_ADVANCE', reference: existing.advanceNumber },
           include: { lines: true },
         });
         for (const je of oldJournals) {
           for (const line of je.lines || []) {
-            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
-            if (Math.abs(netAmount) > 0.001) {
+            const amount = Math.max(line.debitAmount || 0, line.creditAmount || 0);
+            if (amount > 0.001) {
               await tx.account.update({
                 where: { id: line.accountId },
-                data: { currentBalance: { decrement: netAmount } },
+                data: { currentBalance: { decrement: amount } },
               });
             }
           }
@@ -1155,17 +999,18 @@ export const clientAdvanceController = {
 
       await prisma.$transaction(async (tx) => {
         // 1. Reverse journal entries and account balances
+        // Convention A: decrement by max(debit, credit) for each line
         const journals = await tx.journalEntry.findMany({
           where: { referenceType: 'CLIENT_ADVANCE', reference: existing.advanceNumber },
           include: { lines: true },
         });
         for (const je of journals) {
           for (const line of je.lines || []) {
-            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
-            if (Math.abs(netAmount) > 0.001) {
+            const amount = Math.max(line.debitAmount || 0, line.creditAmount || 0);
+            if (amount > 0.001) {
               await tx.account.update({
                 where: { id: line.accountId },
-                data: { currentBalance: { decrement: netAmount } },
+                data: { currentBalance: { decrement: amount } },
               });
             }
           }
@@ -1214,7 +1059,7 @@ export const clientAdvanceController = {
   },
   async create(req: Request, res: Response) {
     try {
-      const allowedFields = ['advanceNumber', 'clientId', 'amount', 'date', 'paymentMethod', 'bankAccountId', 'accountId', 'reference', 'description', 'status', 'usedAmount', 'remainingAmount'];
+      const allowedFields = ['advanceNumber', 'clientId', 'amount', 'date', 'paymentMethod', 'bankAccountId', 'accountId', 'reference', 'description'];
       const data: any = {};
       for (const key of allowedFields) {
         if (req.body[key] !== undefined) data[key] = req.body[key];
@@ -1231,10 +1076,11 @@ export const clientAdvanceController = {
 
       // Parse numeric fields
       if (data.amount !== undefined) data.amount = Number(data.amount) || 0;
-      if (data.usedAmount !== undefined) data.usedAmount = Number(data.usedAmount) || 0;
 
-      // Set remainingAmount = amount - usedAmount
-      data.remainingAmount = (data.amount || 0) - (data.usedAmount || 0);
+      // Force safe defaults on create (prevent client from setting used amounts)
+      data.usedAmount = 0;
+      data.status = 'ACTIVE';
+      data.remainingAmount = data.amount || 0;
 
       // Extract accountId before create (not a DB column, used for journal entry only)
       const selectedAccountId = data.accountId || null;
@@ -2360,9 +2206,22 @@ export const paymentEntryController = {
           include: { lines: true, createdBy: true },
         });
 
+        // Look up advance liability account ID BEFORE the balance loop (needed to skip it)
+        let advanceLiabilityAccountId: string | null = null;
+        if (appliedAdvances && appliedAdvances.length > 0) {
+          let _advLiab = await tx.account.findFirst({
+            where: { OR: [{ name: { contains: 'Client Advance' } }, { name: { contains: 'Customer Advance' } }, { name: { contains: 'Advance from' } }, { subType: 'Customer Deposits' }], isActive: true },
+          });
+          if (!_advLiab) _advLiab = await tx.account.findFirst({ where: { OR: [{ type: 'LIABILITY' }, { name: { contains: 'Liability' } }], isActive: true } });
+          advanceLiabilityAccountId = _advLiab?.id || null;
+        }
+
         // Update Account.currentBalance for each journal line
+        // Convention B (debit-positive): increment by (debit - credit)
+        // EXCEPT: skip advance liability account — handled separately below
         for (const line of journalLines) {
           if (!line.accountId) continue;
+          if (advanceLiabilityAccountId && line.accountId === advanceLiabilityAccountId) continue; // skip, handled in advance section
           const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
           if (Math.abs(netAmount) > 0.001) {
             await tx.account.update({
@@ -2372,16 +2231,28 @@ export const paymentEntryController = {
           }
         }
 
+        // Handle advance liability balance update separately (Convention A: debit DECREASES liability)
+        if (advanceLiabilityAccountId) {
+          const advLine = journalLines.find((l: any) => l.accountId === advanceLiabilityAccountId);
+          if (advLine && (advLine.debitAmount || 0) > 0) {
+            await tx.account.update({
+              where: { id: advanceLiabilityAccountId },
+              data: { currentBalance: { decrement: advLine.debitAmount } },
+            });
+          }
+        }
+
         // Update BankAccount + BankTransaction if payment method is Bank/Cheque
         if ((method === 'Bank' || method === 'Cheque') && ledgerAccountId) {
           // Find linked bank account by its accountId
           const linkedBank = await tx.bankAccount.findFirst({ where: { accountId: ledgerAccountId, isActive: true } });
           if (linkedBank) {
-            // Net effect on bank: credits increase balance, debits decrease
             // Find the bank line - it's the line with ledgerAccountId
             const bankLine = journalLines.find((l: any) => l.accountId === ledgerAccountId);
             if (bankLine) {
-              const bankNetAmount = (bankLine.creditAmount || 0) - (bankLine.debitAmount || 0);
+              // For payment receipt: DR Bank (debit > 0) → bank balance increases
+              // For payment disbursement: CR Bank (credit > 0) → bank balance decreases
+              const bankNetAmount = (bankLine.debitAmount || 0) - (bankLine.creditAmount || 0);
               await tx.bankAccount.update({
                 where: { id: linkedBank.id },
                 data: { currentBalance: { increment: bankNetAmount } },
@@ -2537,11 +2408,9 @@ export const paymentEntryController = {
                 },
               });
 
-              // Update account balances
-              // DR Advance Liability: debiting a liability REDUCES it
-              await tx.account.update({ where: { id: advanceLiabilityAccount.id }, data: { currentBalance: { decrement: applyAmount } } });
-              // CR Accounts Receivable: crediting an asset REDUCES it
-              await tx.account.update({ where: { id: arAccount.id }, data: { currentBalance: { decrement: applyAmount } } });
+              // NOTE: Account balance updates for advance liability and AR are handled
+              // by the main journal balance loop above (advance liability is handled specially,
+              // AR is handled by the CR AR line). No double-counting here.
             }
           }
         }
@@ -2567,14 +2436,36 @@ export const paymentEntryController = {
       const meta = parsePaymentMeta(entry.notes);
 
       await prisma.$transaction(async (tx) => {
+        // Look up advance liability account ID (to handle it specially)
+        let advanceLiabilityAccountId: string | null = null;
+        if (meta.appliedAdvances && meta.appliedAdvances.length > 0) {
+          let _advLiab = await tx.account.findFirst({
+            where: { OR: [{ name: { contains: 'Client Advance' } }, { name: { contains: 'Customer Advance' } }, { name: { contains: 'Advance from' } }, { subType: 'Customer Deposits' }], isActive: true },
+          });
+          if (!_advLiab) _advLiab = await tx.account.findFirst({ where: { OR: [{ type: 'LIABILITY' }, { name: { contains: 'Liability' } }], isActive: true } });
+          advanceLiabilityAccountId = _advLiab?.id || null;
+        }
+
         // 1. Reverse Account.currentBalance for each journal line
+        // Convention B reversal for normal lines, Convention A reversal for advance liability
         for (const line of entry.lines || []) {
-          const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
-          if (Math.abs(netAmount) > 0.001) {
-            await tx.account.update({
-              where: { id: line.accountId },
-              data: { currentBalance: { decrement: netAmount } },
-            });
+          if (advanceLiabilityAccountId && line.accountId === advanceLiabilityAccountId) {
+            // Convention A reversal: CREATE did decrement (debit reduces liability), so reverse with increment
+            if ((line.debitAmount || 0) > 0) {
+              await tx.account.update({
+                where: { id: line.accountId },
+                data: { currentBalance: { increment: line.debitAmount } },
+              });
+            }
+          } else {
+            // Convention B reversal: decrement (debit - credit)
+            const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
+            if (Math.abs(netAmount) > 0.001) {
+              await tx.account.update({
+                where: { id: line.accountId },
+                data: { currentBalance: { decrement: netAmount } },
+              });
+            }
           }
         }
 
@@ -2628,21 +2519,11 @@ export const paymentEntryController = {
           }
 
           // Delete ADVANCE_APPLICATION journal entries linked to this payment
+          // (No balance reversal needed — balance updates were done in the main journal loop)
           const advJournals = await tx.journalEntry.findMany({
             where: { referenceType: 'ADVANCE_APPLICATION', reference: entry.entryNumber },
-            include: { lines: true },
           });
           for (const advJE of advJournals) {
-            // Reverse advance journal line balances
-            for (const line of advJE.lines || []) {
-              const netAmount = (line.debitAmount || 0) - (line.creditAmount || 0);
-              if (Math.abs(netAmount) > 0.001) {
-                await tx.account.update({
-                  where: { id: line.accountId },
-                  data: { currentBalance: { decrement: netAmount } },
-                });
-              }
-            }
             await tx.journalEntry.delete({ where: { id: advJE.id } });
           }
         }

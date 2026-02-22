@@ -345,12 +345,6 @@ export const salesInvoicesApi = {
   /** Mark a DRAFT invoice as INVOICED and update linked Job Reference. */
   markAsInvoiced: (id: string) =>
     apiFetch<any>(`/sales-invoices/${id}/mark-invoiced`, { method: 'POST' }),
-  /** Record full payment received for an INVOICED sales invoice. */
-  receivePayment: (id: string, data: { paymentDate: string; paymentMethod: string; bankAccountId?: string; reference?: string }) =>
-    apiFetch<any>(`/sales-invoices/${id}/receive-payment`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
 };
 
 export const invoiceServicesApi = createCrudApi<any>('invoice-services');
