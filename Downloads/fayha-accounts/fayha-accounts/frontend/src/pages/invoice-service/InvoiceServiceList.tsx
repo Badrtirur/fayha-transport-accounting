@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { ServiceGroup, InvoiceService } from '../../types';
-import { invoiceServicesApi, jobCategoriesApi } from '../../services/api';
+import { invoiceServicesApi, jobCategoriesApi, accountsApi } from '../../services/api';
 import Modal from '../../components/common/Modal';
 
 interface ServiceFormData {
@@ -21,6 +21,7 @@ interface ServiceFormData {
   vatRequired: boolean;
   defaultVatPercent: number;
   description: string;
+  ledgerAccountId: string;
 }
 
 const emptyForm: ServiceFormData = {
@@ -31,11 +32,13 @@ const emptyForm: ServiceFormData = {
   vatRequired: true,
   defaultVatPercent: 15,
   description: '',
+  ledgerAccountId: '',
 };
 
 const InvoiceServiceList: React.FC = () => {
   const [groups, setGroups] = useState<ServiceGroup[]>([]);
   const [services, setServices] = useState<InvoiceService[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
@@ -48,10 +51,13 @@ const InvoiceServiceList: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [groupsRaw, servicesRaw] = await Promise.all([
+      const [groupsRaw, servicesRaw, accountsRaw] = await Promise.all([
         jobCategoriesApi.getAll(),
         invoiceServicesApi.getAll(),
+        accountsApi.getAll(),
       ]);
+      const accts = Array.isArray(accountsRaw) ? accountsRaw.filter((a: any) => a.isActive) : [];
+      setAccounts(accts);
       const jobCategories: ServiceGroup[] = Array.isArray(groupsRaw) ? groupsRaw : [];
       const rawServices: any[] = Array.isArray(servicesRaw) ? servicesRaw : [];
 
@@ -64,6 +70,8 @@ const InvoiceServiceList: React.FC = () => {
         groupId: s.serviceGroup || s.groupId || '',
         defaultVatPercent: s.defaultVatPercent ?? (s.vatApplicable === false ? 0 : 15),
         defaultAmount: s.defaultAmount || 0,
+        ledgerAccountId: s.ledgerAccountId || '',
+        description: s.description || '',
       }));
       setServices(serviceData);
 
@@ -136,7 +144,8 @@ const InvoiceServiceList: React.FC = () => {
       defaultAmount: svc.defaultAmount || 0,
       vatRequired: (svc.defaultVatPercent ?? 15) > 0,
       defaultVatPercent: svc.defaultVatPercent ?? 15,
-      description: '',
+      description: (svc as any).description || '',
+      ledgerAccountId: (svc as any).ledgerAccountId || '',
     });
     setShowModal(true);
   };
@@ -171,6 +180,8 @@ const InvoiceServiceList: React.FC = () => {
         vatApplicable: formData.vatRequired,
         defaultVatPercent: formData.vatRequired ? formData.defaultVatPercent : 0,
         defaultAmount: formData.defaultAmount || 0,
+        ledgerAccountId: formData.ledgerAccountId || null,
+        description: formData.description || null,
       };
       if (editingService) {
         await invoiceServicesApi.update(editingService.id, backendData);
@@ -281,6 +292,7 @@ const InvoiceServiceList: React.FC = () => {
                             <th>Service Name (AR)</th>
                             <th>Group</th>
                             <th className="text-right">Default Amount</th>
+                            <th>Ledger Account</th>
                             <th className="text-center">VAT</th>
                             <th className="text-center">Actions</th>
                           </tr>
@@ -304,6 +316,16 @@ const InvoiceServiceList: React.FC = () => {
                                     ? `SAR ${(svc.defaultAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
                                     : '-'}
                                 </span>
+                              </td>
+                              <td>
+                                {(() => {
+                                  const acct = accounts.find((a: any) => a.id === (svc as any).ledgerAccountId);
+                                  return acct ? (
+                                    <span className="text-xs text-slate-600">{acct.code} - {acct.name}</span>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">-</span>
+                                  );
+                                })()}
                               </td>
                               <td className="text-center">
                                 {svc.defaultVatPercent > 0 ? (
@@ -434,6 +456,28 @@ const InvoiceServiceList: React.FC = () => {
               step="0.01"
               className="input-premium"
             />
+          </div>
+
+          {/* Ledger Account */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Ledger Account
+            </label>
+            <select
+              value={formData.ledgerAccountId}
+              onChange={(e) => handleFormChange('ledgerAccountId', e.target.value)}
+              className="input-premium"
+            >
+              <option value="">-- No Ledger Account --</option>
+              {accounts
+                .sort((a: any, b: any) => (a.code || '').localeCompare(b.code || ''))
+                .map((acct: any) => (
+                  <option key={acct.id} value={acct.id}>
+                    {acct.code} - {acct.name}{acct.nameAr ? ` (${acct.nameAr})` : ''}
+                  </option>
+                ))}
+            </select>
+            <p className="text-xs text-slate-400 mt-1">Revenue account linked to this service for journal entries</p>
           </div>
 
           {/* VAT Required + VAT % */}

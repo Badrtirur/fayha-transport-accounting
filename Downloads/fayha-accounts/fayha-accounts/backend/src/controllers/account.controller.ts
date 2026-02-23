@@ -211,7 +211,7 @@ export const accountController = {
       const rows = accounts.map(acc => {
         const sums = lineMap[acc.id] || { totalDebit: 0, totalCredit: 0 };
         const openingBal = Number(acc.openingBalance) || 0;
-        const isNormalDebit = ['ASSET', 'EXPENSE'].includes(acc.type);
+        const isNormalDebit = ['ASSET', 'EXPENSE'].includes((acc.type || '').toUpperCase());
 
         // Net balance = opening + journal activity
         let netBalance: number;

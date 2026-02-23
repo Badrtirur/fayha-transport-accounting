@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import PageHeader from '../../components/common/PageHeader';
 import { dashboardApi } from '../../services/api';
+import toast from 'react-hot-toast';
 import { TrendingUp, TrendingDown, DollarSign, Percent, Printer, RefreshCw } from 'lucide-react';
 
 interface PLAccount {
@@ -28,7 +29,8 @@ const IncomeStatement: React.FC = () => {
     try {
       const result = await dashboardApi.getIncomeStatement();
       setData(result);
-    } catch {
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load income statement');
       setData(null);
     }
     setLoading(false);
@@ -65,7 +67,7 @@ const IncomeStatement: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600"><TrendingUp className="h-5 w-5" /></div>
             <div>
-              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalRevenue || 0).toLocaleString()}</p>
+              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="text-xs text-slate-500 font-medium">Total Revenue</p>
             </div>
           </div>
@@ -74,7 +76,7 @@ const IncomeStatement: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-red-50 flex items-center justify-center text-red-600"><TrendingDown className="h-5 w-5" /></div>
             <div>
-              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalExpenses || 0).toLocaleString()}</p>
+              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="text-xs text-slate-500 font-medium">Total Expenses</p>
             </div>
           </div>
@@ -86,7 +88,7 @@ const IncomeStatement: React.FC = () => {
             </div>
             <div>
               <p className={`text-xl font-bold ${isProfitable ? 'text-emerald-600' : 'text-red-600'}`}>
-                SAR {Math.abs(netIncome).toLocaleString()}
+                SAR {Math.abs(netIncome).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
               <p className="text-xs text-slate-500 font-medium">{isProfitable ? 'Net Income' : 'Net Loss'}</p>
             </div>
@@ -205,7 +207,7 @@ const IncomeStatement: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold">{isProfitable ? 'Net Income' : 'Net Loss'}</h3>
-                <p className="text-sm text-white/70 mt-1">Revenue SAR {(data.totalRevenue || 0).toLocaleString()} - Expenses SAR {(data.totalExpenses || 0).toLocaleString()}</p>
+                <p className="text-sm text-white/70 mt-1">Revenue SAR {(data.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} - Expenses SAR {(data.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
               </div>
               <div className="text-right">
                 <p className="text-4xl font-bold">SAR {Math.abs(data.netIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>

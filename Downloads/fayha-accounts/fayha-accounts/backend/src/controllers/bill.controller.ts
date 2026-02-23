@@ -60,6 +60,9 @@ export const billController = {
       let subtotal = 0;
 
       const processedLines = lineItems.map((item: any, i: number) => {
+        if (Number(item.quantity) <= 0 || Number(item.unitPrice) < 0) {
+          throw new Error(`Line ${i + 1}: quantity must be positive and unitPrice cannot be negative`);
+        }
         const amount = Number(item.quantity) * Number(item.unitPrice);
         const itemVat = amount * vatRate;
         subtotal += amount;
@@ -116,6 +119,13 @@ export const billController = {
               where: { type: 'EXPENSE', isActive: true },
             });
             expenseAccountId = expAcct?.id || null;
+          }
+
+          if (!apAccount) {
+            console.warn(`[Bill ${bill.billNumber}] No Accounts Payable account found - journal entry skipped`);
+          }
+          if (!expenseAccountId) {
+            console.warn(`[Bill ${bill.billNumber}] No expense account found - journal entry skipped`);
           }
 
           if (apAccount && expenseAccountId) {

@@ -160,7 +160,8 @@ export const journalController = {
         const account = await prisma.account.findUnique({ where: { id: line.accountId } });
         if (!account) continue;
 
-        const isNormalDebit = ['ASSET', 'EXPENSE'].includes(account.type);
+        const typeUpper = (account.type || '').toUpperCase();
+        const isNormalDebit = ['ASSET', 'EXPENSE'].includes(typeUpper);
         let balanceChange = 0;
 
         if (isNormalDebit) {
@@ -173,6 +174,13 @@ export const journalController = {
           where: { id: line.accountId },
           data: { currentBalance: { increment: balanceChange } }
         });
+      }
+
+      // Re-validate debits = credits before posting
+      const totalDebit = entry.lines.reduce((s, l) => s + Number(l.debitAmount || 0), 0);
+      const totalCredit = entry.lines.reduce((s, l) => s + Number(l.creditAmount || 0), 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.01) {
+        return res.status(400).json({ success: false, error: `Cannot post: Debits (${totalDebit}) do not equal Credits (${totalCredit})` });
       }
 
       const updated = await prisma.journalEntry.update({
@@ -215,7 +223,8 @@ export const journalController = {
         const account = await prisma.account.findUnique({ where: { id: line.accountId } });
         if (!account) continue;
 
-        const isNormalDebit = ['ASSET', 'EXPENSE'].includes(account.type);
+        const typeUpper = (account.type || '').toUpperCase();
+        const isNormalDebit = ['ASSET', 'EXPENSE'].includes(typeUpper);
         let balanceChange = 0;
 
         if (isNormalDebit) {

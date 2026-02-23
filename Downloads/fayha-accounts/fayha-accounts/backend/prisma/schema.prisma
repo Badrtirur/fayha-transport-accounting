@@ -8,7 +8,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -48,7 +48,7 @@ model Account {
   name            String
   nameAr          String?
   type            String
-  subType         String
+  subType         String    @default("General")
   description     String?
   parentId        String?
   level           Int       @default(1)
@@ -538,16 +538,18 @@ model InvoiceLineItem {
 // ==================== SALES INVOICE (Clearance) ====================
 
 model InvoiceService {
-  id            String    @id @default(cuid())
-  code          String    @unique
-  nameEn        String
-  nameAr        String
-  serviceGroup  String
-  defaultAmount Float     @default(0)
-  vatApplicable Boolean   @default(true)
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  code            String    @unique
+  nameEn          String
+  nameAr          String
+  serviceGroup    String
+  defaultAmount   Float     @default(0)
+  vatApplicable   Boolean   @default(true)
+  ledgerAccountId String?
+  description     String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   salesInvoiceItems SalesInvoiceItem[]
   clientServices    ClientService[]
 }

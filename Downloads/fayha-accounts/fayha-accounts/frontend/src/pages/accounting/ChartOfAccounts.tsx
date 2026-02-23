@@ -8,17 +8,28 @@ import {
     DollarSign, BarChart3, Plus, Edit3, Trash2, X, Loader2,
 } from 'lucide-react';
 
-const typeConfig: Record<string, { bg: string; text: string; icon: any }> = {
-    'Asset': { bg: 'bg-blue-50', text: 'text-blue-600', icon: Wallet },
-    'Liability': { bg: 'bg-rose-50', text: 'text-rose-600', icon: TrendingDown },
-    'Equity': { bg: 'bg-purple-50', text: 'text-purple-600', icon: Landmark },
-    'Revenue': { bg: 'bg-emerald-50', text: 'text-emerald-600', icon: TrendingUp },
-    'Expense': { bg: 'bg-amber-50', text: 'text-amber-600', icon: DollarSign },
+const typeConfig: Record<string, { bg: string; text: string; icon: any; label: string }> = {
+    'ASSET': { bg: 'bg-blue-50', text: 'text-blue-600', icon: Wallet, label: 'Asset' },
+    'Asset': { bg: 'bg-blue-50', text: 'text-blue-600', icon: Wallet, label: 'Asset' },
+    'LIABILITY': { bg: 'bg-rose-50', text: 'text-rose-600', icon: TrendingDown, label: 'Liability' },
+    'Liability': { bg: 'bg-rose-50', text: 'text-rose-600', icon: TrendingDown, label: 'Liability' },
+    'EQUITY': { bg: 'bg-purple-50', text: 'text-purple-600', icon: Landmark, label: 'Equity' },
+    'Equity': { bg: 'bg-purple-50', text: 'text-purple-600', icon: Landmark, label: 'Equity' },
+    'REVENUE': { bg: 'bg-emerald-50', text: 'text-emerald-600', icon: TrendingUp, label: 'Revenue' },
+    'Revenue': { bg: 'bg-emerald-50', text: 'text-emerald-600', icon: TrendingUp, label: 'Revenue' },
+    'EXPENSE': { bg: 'bg-amber-50', text: 'text-amber-600', icon: DollarSign, label: 'Expense' },
+    'Expense': { bg: 'bg-amber-50', text: 'text-amber-600', icon: DollarSign, label: 'Expense' },
 };
 
-const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
+const ACCOUNT_TYPES = [
+    { value: 'ASSET', label: 'Asset' },
+    { value: 'LIABILITY', label: 'Liability' },
+    { value: 'EQUITY', label: 'Equity' },
+    { value: 'REVENUE', label: 'Revenue' },
+    { value: 'EXPENSE', label: 'Expense' },
+] as const;
 
-const emptyForm = { code: '', name: '', type: 'Asset', parentId: '', description: '', balance: 0 };
+const emptyForm = { code: '', name: '', type: 'ASSET', subType: 'GENERAL', parentId: '', description: '', balance: 0 };
 
 const ChartOfAccounts: React.FC = () => {
     const [accounts, setAccounts] = useState<Account[]>([]);
@@ -38,10 +49,13 @@ const ChartOfAccounts: React.FC = () => {
             setLoading(true);
             const raw = await accountsApi.getAll();
             const list = Array.isArray(raw) ? raw : [];
+            // Build a set of IDs that are parents (have children)
+            const parentIds = new Set(list.map((a: any) => a.parentId).filter(Boolean));
             // Map backend fields to frontend expected fields
             const mapped = list.map((a: any) => ({
                 ...a,
                 balance: a.balance ?? a.currentBalance ?? a.openingBalance ?? 0,
+                isGroup: a.isGroup || a.subType === 'GROUP' || parentIds.has(a.id),
             }));
             setAccounts(mapped);
         } catch (err: any) {
@@ -55,9 +69,9 @@ const ChartOfAccounts: React.FC = () => {
         fetchAccounts();
     }, []);
 
-    const totalAssets = accounts.filter(a => a.type === 'Asset' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
-    const totalLiabilities = accounts.filter(a => a.type === 'Liability' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
-    const totalRevenue = accounts.filter(a => a.type === 'Revenue' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+    const totalAssets = accounts.filter(a => (a.type || '').toUpperCase() === 'ASSET' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+    const totalLiabilities = accounts.filter(a => (a.type || '').toUpperCase() === 'LIABILITY' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+    const totalRevenue = accounts.filter(a => (a.type || '').toUpperCase() === 'REVENUE' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
 
     // --- Add / Edit handlers ---
     const openAddModal = () => {
@@ -71,7 +85,8 @@ const ChartOfAccounts: React.FC = () => {
         setForm({
             code: account.code || '',
             name: account.name || '',
-            type: account.type || 'Asset',
+            type: account.type || 'ASSET',
+            subType: account.subType || 'GENERAL',
             parentId: account.parentId || '',
             description: (account as any).description || '',
             balance: account.balance || 0,
@@ -102,6 +117,7 @@ const ChartOfAccounts: React.FC = () => {
                     code: form.code,
                     name: form.name,
                     type: form.type,
+                    subType: form.subType || 'General',
                     parentId: form.parentId || undefined,
                     description: form.description,
                     openingBalance: form.balance,
@@ -208,7 +224,7 @@ const ChartOfAccounts: React.FC = () => {
                             <th className="w-32">Code</th>
                             <th>Account Name</th>
                             <th className="w-40">Type</th>
-                            <th className="text-right w-40">Balance</th>
+                            <th className="text-right w-48">Balance (Dr/Cr)</th>
                             <th className="text-center w-32">Actions</th>
                         </tr>
                     </thead>
@@ -251,13 +267,20 @@ const ChartOfAccounts: React.FC = () => {
                                         </td>
                                         <td className="py-3.5 px-4">
                                             <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold ${config.bg} ${config.text}`}>
-                                                {account.type}
+                                                {config.label || account.type}
                                             </span>
                                         </td>
                                         <td className="py-3.5 px-4 text-right">
-                                            <span className={`text-sm font-bold ${(account.balance || 0) >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
-                                                SAR {Math.abs(account.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </span>
+                                            {(account.balance || 0) !== 0 ? (
+                                                <span className={`text-sm font-bold ${(account.balance || 0) > 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                                                    <span className={`text-xs font-semibold mr-1 ${(account.balance || 0) > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
+                                                        {(account.balance || 0) > 0 ? 'Dr' : 'Cr'}
+                                                    </span>
+                                                    SAR {Math.abs(account.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </span>
+                                            ) : (
+                                                <span className="text-sm text-slate-300">—</span>
+                                            )}
                                         </td>
                                         <td className="py-3.5 px-4 text-center">
                                             <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -329,7 +352,7 @@ const ChartOfAccounts: React.FC = () => {
                                         className="input-premium w-full"
                                     >
                                         {ACCOUNT_TYPES.map(t => (
-                                            <option key={t} value={t}>{t}</option>
+                                            <option key={t.value} value={t.value}>{t.label}</option>
                                         ))}
                                     </select>
                                 </div>
@@ -341,9 +364,14 @@ const ChartOfAccounts: React.FC = () => {
                                         className="input-premium w-full"
                                     >
                                         <option value="">-- No Parent (Root) --</option>
-                                        {accounts.filter(a => a.isGroup).map(a => (
-                                            <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
-                                        ))}
+                                        {accounts
+                                            .filter(a => !editingAccount || a.id !== editingAccount.id)
+                                            .sort((a, b) => (a.code || '').localeCompare(b.code || ''))
+                                            .map(a => (
+                                                <option key={a.id} value={a.id}>
+                                                    {a.code} - {a.name} ({a.type})
+                                                </option>
+                                            ))}
                                     </select>
                                 </div>
                             </div>

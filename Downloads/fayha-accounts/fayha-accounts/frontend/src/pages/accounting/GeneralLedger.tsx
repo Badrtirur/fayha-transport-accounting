@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import PageHeader from '../../components/common/PageHeader';
 import { accountsApi, accountingApi } from '../../services/api';
+import toast from 'react-hot-toast';
 import { BookOpen, Search, ChevronRight, Calendar, Printer, RefreshCw, FileText } from 'lucide-react';
 
 interface LedgerEntry {
@@ -28,7 +29,9 @@ const GeneralLedger: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    accountsApi.getAll().then(setAccounts).catch(() => {});
+    accountsApi.getAll().then(setAccounts).catch((err: any) => {
+      toast.error(err?.message || 'Failed to load accounts');
+    });
   }, []);
 
   const fetchLedger = async (accountId: string) => {
@@ -61,7 +64,8 @@ const GeneralLedger: React.FC = () => {
         };
       });
       setEntries(withBalance);
-    } catch {
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load ledger entries');
       setEntries([]);
     }
     setLoading(false);
@@ -196,6 +200,11 @@ const GeneralLedger: React.FC = () => {
                 </div>
                 <div className="bg-white rounded-xl p-4 shadow-card border border-slate-100/80 text-center">
                   <p className={`text-lg font-bold ${totalDebits - totalCredits >= 0 ? 'text-slate-900' : 'text-red-600'}`}>
+                    {totalDebits - totalCredits !== 0 && (
+                      <span className={`text-xs mr-1 ${totalDebits - totalCredits > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
+                        {totalDebits - totalCredits > 0 ? 'Dr' : 'Cr'}
+                      </span>
+                    )}
                     SAR {Math.abs(totalDebits - totalCredits).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </p>
                   <p className="text-xs text-slate-500">Net Movement</p>
@@ -233,7 +242,12 @@ const GeneralLedger: React.FC = () => {
                           {entry.credit > 0 ? <span className="text-emerald-700">{(entry.credit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : <span className="text-slate-300">-</span>}
                         </td>
                         <td className="py-3 px-4 text-right text-sm font-bold text-slate-900">
-                          {(entry.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {(entry.balance || 0) !== 0 && (
+                            <span className={`text-[10px] font-semibold mr-1 ${(entry.balance || 0) > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
+                              {(entry.balance || 0) > 0 ? 'Dr' : 'Cr'}
+                            </span>
+                          )}
+                          {Math.abs(entry.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                       </tr>
                     ))}
@@ -245,7 +259,16 @@ const GeneralLedger: React.FC = () => {
                         <td className="py-4 px-4 text-right text-base font-bold text-blue-700">{totalDebits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         <td className="py-4 px-4 text-right text-base font-bold text-emerald-700">{totalCredits.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         <td className="py-4 px-4 text-right text-base font-bold text-slate-900">
-                          {entries.length > 0 ? (entries[entries.length - 1].balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+                          {entries.length > 0 ? (
+                            <>
+                              {(entries[entries.length - 1].balance || 0) !== 0 && (
+                                <span className={`text-xs mr-1 ${(entries[entries.length - 1].balance || 0) > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
+                                  {(entries[entries.length - 1].balance || 0) > 0 ? 'Dr' : 'Cr'}
+                                </span>
+                              )}
+                              {Math.abs(entries[entries.length - 1].balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </>
+                          ) : '0.00'}
                         </td>
                       </tr>
                     </tfoot>

@@ -28,7 +28,7 @@ function crud(model: any, includes?: any, orderBy?: any, opts?: CrudOptions) {
       if (data[df] && typeof data[df] === 'string') data[df] = new Date(data[df]);
     }
     // Nullify empty FK strings
-    for (const fk of ['vendorId', 'clientId', 'jobRefId', 'bankAccountId', 'accountId']) {
+    for (const fk of ['vendorId', 'clientId', 'jobRefId', 'bankAccountId', 'accountId', 'ledgerAccountId']) {
       if (data[fk] !== undefined && (!data[fk] || (typeof data[fk] === 'string' && data[fk].trim().length === 0))) {
         data[fk] = null;
       }
@@ -854,7 +854,7 @@ export const salesInvoiceController = {
 // ==================== INVOICE SERVICES ====================
 export const invoiceServiceController = crud(prisma.invoiceService, undefined, { nameEn: 'asc' }, {
   autoCodePrefix: 'SVC',
-  allowedFields: ['code', 'nameEn', 'nameAr', 'serviceGroup', 'defaultAmount', 'vatApplicable', 'isActive'],
+  allowedFields: ['code', 'nameEn', 'nameAr', 'serviceGroup', 'defaultAmount', 'vatApplicable', 'isActive', 'ledgerAccountId', 'description'],
 });
 
 // ==================== CLIENT ADVANCES ====================

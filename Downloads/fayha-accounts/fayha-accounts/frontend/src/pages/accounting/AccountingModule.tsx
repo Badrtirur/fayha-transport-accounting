@@ -107,20 +107,22 @@ const OverviewTab: React.FC<{
   banks: any[];
   onNavigate: (tab: string) => void;
 }> = ({ accounts, journals, banks, onNavigate }) => {
-  const totalAssets = accounts.filter(a => a.type === 'Asset' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
-  const totalLiabilities = accounts.filter(a => a.type === 'Liability' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
-  const totalRevenue = accounts.filter(a => a.type === 'Revenue' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
-  const totalExpenses = accounts.filter(a => a.type === 'Expense' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+  const typeMatch = (a: Account, t: string) => (a.type || '').toUpperCase() === t;
+  const totalAssets = accounts.filter(a => typeMatch(a, 'ASSET') && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+  const totalLiabilities = accounts.filter(a => typeMatch(a, 'LIABILITY') && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+  const totalRevenue = accounts.filter(a => typeMatch(a, 'REVENUE') && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
+  const totalExpenses = accounts.filter(a => typeMatch(a, 'EXPENSE') && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
   const netProfit = totalRevenue - totalExpenses;
   const bankCashBalance = banks.reduce((s, b) => s + (b.currentBalance || b.balance || 0), 0);
 
   // Compute real account type distribution from accounts data
   const computedAccountTypeDistribution = useMemo(() => {
-    const assetTotal = accounts.filter(a => a.type === 'Asset' && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
-    const liabilityTotal = accounts.filter(a => a.type === 'Liability' && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
-    const equityTotal = accounts.filter(a => a.type === 'Equity' && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
-    const revenueTotal = accounts.filter(a => a.type === 'Revenue' && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
-    const expenseTotal = accounts.filter(a => a.type === 'Expense' && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
+    const tm = (a: Account, t: string) => (a.type || '').toUpperCase() === t;
+    const assetTotal = accounts.filter(a => tm(a, 'ASSET') && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
+    const liabilityTotal = accounts.filter(a => tm(a, 'LIABILITY') && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
+    const equityTotal = accounts.filter(a => tm(a, 'EQUITY') && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
+    const revenueTotal = accounts.filter(a => tm(a, 'REVENUE') && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
+    const expenseTotal = accounts.filter(a => tm(a, 'EXPENSE') && !a.isGroup).reduce((s, a) => s + Math.abs(a.balance || 0), 0);
 
     return [
       { name: 'Assets', value: assetTotal, color: '#3b82f6' },
@@ -138,7 +140,7 @@ const OverviewTab: React.FC<{
 
     // Process journal entries
     journals.forEach(journal => {
-      if (journal.status !== 'Posted') return; // Only count posted journals
+      if (journal.status?.toUpperCase() !== 'POSTED') return; // Only count posted journals
 
       const journalDate = new Date(journal.date);
       const monthIndex = journalDate.getMonth();
@@ -147,10 +149,11 @@ const OverviewTab: React.FC<{
         const account = accounts.find(a => a.id === line.accountId);
         if (!account) return;
 
-        if (account.type === 'Revenue') {
+        const accType = (account.type || '').toUpperCase();
+        if (accType === 'REVENUE') {
           // Revenue increases with credits
           monthlyData[monthIndex].revenue += line.creditAmount || 0;
-        } else if (account.type === 'Expense') {
+        } else if (accType === 'EXPENSE') {
           // Expenses increase with debits
           monthlyData[monthIndex].expenses += line.debitAmount || 0;
         }
@@ -174,7 +177,7 @@ const OverviewTab: React.FC<{
 
     // Process journal entries affecting bank/cash accounts
     journals.forEach(journal => {
-      if (journal.status !== 'Posted') return;
+      if (journal.status?.toUpperCase() !== 'POSTED') return;
 
       const journalDate = new Date(journal.date);
       const monthIndex = journalDate.getMonth();
@@ -386,12 +389,12 @@ const OverviewTab: React.FC<{
                     <td className="text-right"><span className="font-semibold text-sm text-slate-900">SAR {fmt(totalCr)}</span></td>
                     <td className="text-center">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                        j.status === 'Posted' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
-                        j.status === 'Draft' ? 'bg-slate-50 border-slate-200 text-slate-600' :
+                        (j.status || '').toUpperCase() === 'POSTED' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+                        (j.status || '').toUpperCase() === 'DRAFT' ? 'bg-slate-50 border-slate-200 text-slate-600' :
                         'bg-rose-50 border-rose-200 text-rose-700'
                       }`}>
-                        {j.status === 'Posted' ? <CheckCircle2 className="h-3 w-3" /> : j.status === 'Draft' ? <Clock className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                        {j.status}
+                        {(j.status || '').toUpperCase() === 'POSTED' ? <CheckCircle2 className="h-3 w-3" /> : (j.status || '').toUpperCase() === 'DRAFT' ? <Clock className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                        {(j.status || '').toUpperCase() === 'POSTED' ? 'Posted' : (j.status || '').toUpperCase() === 'DRAFT' ? 'Draft' : 'Void'}
                       </span>
                     </td>
                   </tr>
@@ -456,17 +459,18 @@ const ChartOfAccountsTab: React.FC<{
   const [newAccount, setNewAccount] = useState({
     code: '',
     name: '',
-    type: 'Asset' as Account['type'],
+    type: 'ASSET' as string,
+    subType: '',
     parentId: '',
     isGroup: false,
   });
 
-  const typeConfig: Record<string, { bg: string; text: string }> = {
-    'Asset': { bg: 'bg-blue-50', text: 'text-blue-600' },
-    'Liability': { bg: 'bg-rose-50', text: 'text-rose-600' },
-    'Equity': { bg: 'bg-purple-50', text: 'text-purple-600' },
-    'Revenue': { bg: 'bg-emerald-50', text: 'text-emerald-600' },
-    'Expense': { bg: 'bg-amber-50', text: 'text-amber-600' },
+  const typeConfig: Record<string, { bg: string; text: string; label: string }> = {
+    'ASSET': { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Asset' },
+    'LIABILITY': { bg: 'bg-rose-50', text: 'text-rose-600', label: 'Liability' },
+    'EQUITY': { bg: 'bg-purple-50', text: 'text-purple-600', label: 'Equity' },
+    'REVENUE': { bg: 'bg-emerald-50', text: 'text-emerald-600', label: 'Revenue' },
+    'EXPENSE': { bg: 'bg-amber-50', text: 'text-amber-600', label: 'Expense' },
   };
 
   const toggleGroup = (id: string) => {
@@ -506,6 +510,7 @@ const ChartOfAccountsTab: React.FC<{
         code: newAccount.code,
         name: newAccount.name,
         type: newAccount.type,
+        subType: newAccount.subType || 'General',
         level,
         parentId: newAccount.parentId || undefined,
         balance: 0,
@@ -514,7 +519,7 @@ const ChartOfAccountsTab: React.FC<{
       setAccounts(prev => [...prev, created]);
       toast.success('Account created successfully');
       setShowAddModal(false);
-      setNewAccount({ code: '', name: '', type: 'Asset', parentId: '', isGroup: false });
+      setNewAccount({ code: '', name: '', type: 'ASSET', subType: '', parentId: '', isGroup: false });
     } catch (err: any) {
       toast.error(err?.message || 'Failed to create account');
     }
@@ -561,7 +566,7 @@ const ChartOfAccountsTab: React.FC<{
           </thead>
           <tbody>
             {filteredAccounts.map(account => {
-              const config = typeConfig[account.type] || typeConfig['Asset'];
+              const config = typeConfig[(account.type || '').toUpperCase()] || typeConfig['ASSET'];
               const paddingLeft = (account.level - 1) * 24 + 16;
               const isCollapsed = collapsedGroups.has(account.id);
               return (
@@ -593,7 +598,7 @@ const ChartOfAccountsTab: React.FC<{
                   </td>
                   <td className="py-3.5 px-4">
                     <span className={`inline-flex items-center px-2 py-1 rounded-lg text-xs font-semibold ${config.bg} ${config.text}`}>
-                      {account.type}
+                      {config.label || account.type}
                     </span>
                   </td>
                   <td className="py-3.5 px-4 text-right">
@@ -644,14 +649,14 @@ const ChartOfAccountsTab: React.FC<{
               <label className="block text-xs font-semibold text-slate-500 mb-1.5">Account Type <span className="text-rose-500">*</span></label>
               <select
                 value={newAccount.type}
-                onChange={e => setNewAccount(p => ({ ...p, type: e.target.value as Account['type'] }))}
+                onChange={e => setNewAccount(p => ({ ...p, type: e.target.value }))}
                 className="input-premium w-full"
               >
-                <option value="Asset">Asset</option>
-                <option value="Liability">Liability</option>
-                <option value="Equity">Equity</option>
-                <option value="Revenue">Revenue</option>
-                <option value="Expense">Expense</option>
+                <option value="ASSET">Asset</option>
+                <option value="LIABILITY">Liability</option>
+                <option value="EQUITY">Equity</option>
+                <option value="REVENUE">Revenue</option>
+                <option value="EXPENSE">Expense</option>
               </select>
             </div>
             <SearchableSelect
@@ -710,7 +715,7 @@ const GeneralLedgerTab: React.FC<{
     if (!selectedAccountId) return [];
     const entries: { date: string; reference: string; description: string; debit: number; credit: number }[] = [];
     journals
-      .filter(j => j.status === 'Posted' && j.date >= dateFrom && j.date <= dateTo)
+      .filter(j => (j.status || '').toUpperCase() === 'POSTED' && j.date >= dateFrom && j.date <= dateTo)
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach(j => {
         j.lines.forEach(line => {
@@ -896,10 +901,10 @@ const JournalEntriesTab: React.FC<{
     .filter(a => !a.isGroup)
     .map(a => ({ value: a.id, label: `${a.code} - ${a.name}` }));
 
-  const statusConfig: Record<string, { bg: string; text: string; Icon: React.FC<any> }> = {
-    'Draft': { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', Icon: Clock },
-    'Posted': { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', Icon: CheckCircle2 },
-    'Void': { bg: 'bg-rose-50 border-rose-200', text: 'text-rose-700', Icon: XCircle },
+  const statusConfig: Record<string, { bg: string; text: string; label: string; Icon: React.FC<any> }> = {
+    'DRAFT': { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', label: 'Draft', Icon: Clock },
+    'POSTED': { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Posted', Icon: CheckCircle2 },
+    'VOID': { bg: 'bg-rose-50 border-rose-200', text: 'text-rose-700', label: 'Void', Icon: XCircle },
   };
 
   const toggleExpand = (id: string) => {
@@ -911,7 +916,7 @@ const JournalEntriesTab: React.FC<{
   };
 
   const filteredJournals = journals.filter(j => {
-    if (statusFilter !== 'All' && j.status !== statusFilter) return false;
+    if (statusFilter !== 'All' && (j.status || '').toUpperCase() !== statusFilter.toUpperCase()) return false;
     if (typeFilter !== 'All') {
       // Type filter is illustrative - entry type tag based on description keywords
       const desc = (j.description || '').toLowerCase();
@@ -939,7 +944,7 @@ const JournalEntriesTab: React.FC<{
     setNewLines(prev => prev.map(l => l.id === id ? { ...l, [field]: value } : l));
   };
 
-  const handleSave = async (status: 'Draft' | 'Posted') => {
+  const handleSave = async (status: 'DRAFT' | 'POSTED') => {
     const isBalanced = Math.abs(totalDr - totalCr) < 0.01;
     if (!isBalanced) return;
     if (!newDescription.trim()) return;
@@ -953,7 +958,7 @@ const JournalEntriesTab: React.FC<{
       };
       const created = await journalsApi.create(payload);
       setJournals(prev => [created, ...prev]);
-      toast.success(status === 'Posted' ? 'Journal entry posted successfully' : 'Journal entry saved as draft');
+      toast.success(status === 'POSTED' ? 'Journal entry posted successfully' : 'Journal entry saved as draft');
       setShowNewEntry(false);
       setNewDescription('');
       setNewLines([
@@ -1097,14 +1102,14 @@ const JournalEntriesTab: React.FC<{
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button onClick={() => setShowNewEntry(false)} className="btn-ghost">Cancel</button>
             <button
-              onClick={() => handleSave('Draft')}
+              onClick={() => handleSave('DRAFT')}
               disabled={Math.abs(totalDr - totalCr) > 0.01 || !newDescription.trim()}
               className="btn-ghost border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Clock className="h-4 w-4" /> Save as Draft
             </button>
             <button
-              onClick={() => handleSave('Posted')}
+              onClick={() => handleSave('POSTED')}
               disabled={Math.abs(totalDr - totalCr) > 0.01 || !newDescription.trim()}
               className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1124,7 +1129,7 @@ const JournalEntriesTab: React.FC<{
           </div>
         ) : (
           filteredJournals.map(journal => {
-            const config = statusConfig[journal.status] || statusConfig['Draft'];
+            const config = statusConfig[(journal.status || '').toUpperCase()] || statusConfig['DRAFT'];
             const { Icon: StatusIcon } = config;
             const isExpanded = expandedEntries.has(journal.id);
             const jTotalDr = journal.lines.reduce((s, l) => s + (l.debitAmount || l.debit || 0), 0);
@@ -1151,7 +1156,7 @@ const JournalEntriesTab: React.FC<{
                     </div>
                     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${config.bg} ${config.text}`}>
                       <StatusIcon className="h-3 w-3" />
-                      {journal.status}
+                      {config.label || journal.status}
                     </span>
                     {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
                   </div>
@@ -1214,7 +1219,8 @@ const TrialBalanceTab: React.FC<{
     return accounts
       .filter(a => !a.isGroup && (a.balance || 0) !== 0)
       .map(a => {
-        const isDebitNatural = a.type === 'Asset' || a.type === 'Expense';
+        const typeUpper = (a.type || '').toUpperCase();
+        const isDebitNatural = typeUpper === 'ASSET' || typeUpper === 'EXPENSE';
         return {
           code: a.code,
           name: a.name,
@@ -1230,12 +1236,12 @@ const TrialBalanceTab: React.FC<{
   const totalCredit = trialBalanceData.reduce((s, r) => s + (r.creditBalance || 0), 0);
   const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
 
-  const typeConfig: Record<string, { bg: string; text: string }> = {
-    'Asset': { bg: 'bg-blue-50', text: 'text-blue-600' },
-    'Liability': { bg: 'bg-rose-50', text: 'text-rose-600' },
-    'Equity': { bg: 'bg-purple-50', text: 'text-purple-600' },
-    'Revenue': { bg: 'bg-emerald-50', text: 'text-emerald-600' },
-    'Expense': { bg: 'bg-amber-50', text: 'text-amber-600' },
+  const typeConfig: Record<string, { bg: string; text: string; label: string }> = {
+    'ASSET': { bg: 'bg-blue-50', text: 'text-blue-600', label: 'Asset' },
+    'LIABILITY': { bg: 'bg-rose-50', text: 'text-rose-600', label: 'Liability' },
+    'EQUITY': { bg: 'bg-purple-50', text: 'text-purple-600', label: 'Equity' },
+    'REVENUE': { bg: 'bg-emerald-50', text: 'text-emerald-600', label: 'Revenue' },
+    'EXPENSE': { bg: 'bg-amber-50', text: 'text-amber-600', label: 'Expense' },
   };
 
   return (
@@ -1291,14 +1297,14 @@ const TrialBalanceTab: React.FC<{
           </thead>
           <tbody>
             {trialBalanceData.map(row => {
-              const config = typeConfig[row.type] || typeConfig['Asset'];
+              const config = typeConfig[(row.type || '').toUpperCase()] || typeConfig['ASSET'];
               return (
                 <tr key={row.code} className="hover:bg-slate-50/80 transition-colors">
                   <td><span className="font-mono text-sm font-semibold text-slate-400">{row.code}</span></td>
                   <td><span className="text-sm font-medium text-slate-700">{row.name}</span></td>
                   <td>
                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${config.bg} ${config.text}`}>
-                      {row.type}
+                      {config.label || row.type}
                     </span>
                   </td>
                   <td className="text-right">

@@ -72,6 +72,9 @@ export const invoiceController = {
       let subtotal = 0;
 
       const processedLines = lineItems.map((item: any, i: number) => {
+        if (Number(item.quantity) <= 0 || Number(item.unitPrice) < 0) {
+          throw new Error(`Line ${i + 1}: quantity must be positive and unitPrice cannot be negative`);
+        }
         const amount = Number(item.quantity) * Number(item.unitPrice);
         const itemVat = amount * vatRate;
         subtotal += amount;

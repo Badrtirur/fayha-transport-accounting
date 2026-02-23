@@ -17,10 +17,10 @@ const methodConfig: Record<string, { bg: string; text: string }> = {
     'Credit Card': { bg: 'bg-purple-50', text: 'text-purple-700' },
 };
 
-const statusConfig: Record<string, { bg: string; text: string; dot: string }> = {
-    'Draft': { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400' },
-    'Posted': { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-    'Void': { bg: 'bg-rose-50 border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500' },
+const statusConfig: Record<string, { bg: string; text: string; dot: string; label: string }> = {
+    'DRAFT': { bg: 'bg-slate-50 border-slate-200', text: 'text-slate-600', dot: 'bg-slate-400', label: 'Draft' },
+    'POSTED': { bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500', label: 'Posted' },
+    'VOID': { bg: 'bg-rose-50 border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500', label: 'Void' },
 };
 
 const PAYMENT_METHODS = ['Bank Transfer', 'Check', 'Cash', 'Credit Card'];
@@ -114,8 +114,8 @@ const PaymentList: React.FC = () => {
                 setVendors(Array.isArray(vendData) ? vendData : []);
                 setInvoices(Array.isArray(invData) ? invData : []);
                 setBills(Array.isArray(billData) ? billData : []);
-            } catch {
-                // Silently fail - selects will just be empty
+            } catch (err: any) {
+                toast.error(err?.message || 'Failed to load lookup data');
             }
         };
         loadLookups();
@@ -227,7 +227,7 @@ const PaymentList: React.FC = () => {
 
     const paginatedPayments = payments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalReceived = payments.reduce((s, p) => s + (p.amount || 0), 0);
-    const postedCount = payments.filter(p => p.status === 'Posted').length;
+    const postedCount = payments.filter(p => (p.status || '').toUpperCase() === 'POSTED').length;
 
     if (loading) {
         return (
@@ -267,7 +267,7 @@ const PaymentList: React.FC = () => {
                 </div>
                 <div className="bg-white rounded-2xl p-4 shadow-card border border-slate-100/80 flex items-center gap-3">
                     <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600"><Clock className="h-5 w-5" /></div>
-                    <div><p className="text-xl font-bold text-slate-900">{payments.filter(p => p.status === 'Draft').length}</p><p className="text-xs text-slate-500">Pending</p></div>
+                    <div><p className="text-xl font-bold text-slate-900">{payments.filter(p => (p.status || '').toUpperCase() === 'DRAFT').length}</p><p className="text-xs text-slate-500">Pending</p></div>
                 </div>
             </div>
 
@@ -297,7 +297,7 @@ const PaymentList: React.FC = () => {
                         ) : (
                             paginatedPayments.map((pay) => {
                                 const method = methodConfig[pay.method] || methodConfig['Bank Transfer'];
-                                const status = statusConfig[pay.status] || statusConfig['Draft'];
+                                const status = statusConfig[(pay.status || '').toUpperCase()] || statusConfig['DRAFT'];
                                 return (
                                     <tr key={pay.id}>
                                         <td>
@@ -326,7 +326,7 @@ const PaymentList: React.FC = () => {
                                         <td className="text-center">
                                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${status.bg} ${status.text}`}>
                                                 <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-                                                {pay.status}
+                                                {status.label || pay.status}
                                             </span>
                                         </td>
                                         <td className="text-center">

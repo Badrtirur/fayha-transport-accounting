@@ -1,0 +1,15 @@
+name = "fayha-backend"
+main = "dist/server.js"
+compatibility_date = "2024-12-01"
+node_compat = true
+
+[vars]
+NODE_ENV = "production"
+PORT = "8787"
+API_VERSION = "v1"
+
+# Add secrets via: npx wrangler secret put SECRET_NAME
+# Required secrets:
+#   DATABASE_URL
+#   JWT_SECRET
+#   JWT_REFRESH_SECRET

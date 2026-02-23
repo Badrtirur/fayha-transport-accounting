@@ -48,7 +48,7 @@ async function checkNumberExists(counterName: string, value: string): Promise<bo
       CLIENT_ADVANCE: async () => !!(await prisma.clientAdvance.findFirst({ where: { advanceNumber: value } })),
       EXPENSE_ENTRY: async () => !!(await prisma.expenseEntry.findFirst({ where: { expenseNumber: value } })),
       PAYABLE_EXPENSE: async () => !!(await prisma.payableExpense.findFirst({ where: { expenseNumber: value } })),
-      PAYMENT_ENTRY: async () => !!(await prisma.payableExpense.findFirst({ where: { expenseNumber: value } })),
+      PAYMENT_ENTRY: async () => !!(await prisma.journalEntry.findFirst({ where: { entryNumber: value } })),
       RCV_VOUCHER: async () => !!(await prisma.rcvPvc.findFirst({ where: { voucherNo: value } })),
       PVC_VOUCHER: async () => !!(await prisma.rcvPvc.findFirst({ where: { voucherNo: value } })),
     };

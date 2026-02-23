@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import PageHeader from '../../components/common/PageHeader';
 import { dashboardApi } from '../../services/api';
+import toast from 'react-hot-toast';
 import { Wallet, TrendingDown, Landmark, Scale, Printer, RefreshCw } from 'lucide-react';
 
 interface BSAccount {
@@ -78,7 +79,8 @@ const BalanceSheet: React.FC = () => {
     try {
       const result = await dashboardApi.getBalanceSheet();
       setData(result);
-    } catch {
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load balance sheet');
       setData(null);
     }
     setLoading(false);
@@ -87,7 +89,7 @@ const BalanceSheet: React.FC = () => {
   useEffect(() => { fetchData(); }, []);
 
   const liabilitiesPlusEquity = (data?.totalLiabilities || 0) + (data?.totalEquity || 0);
-  const isBalanced = data ? Math.abs(data.totalAssets - liabilitiesPlusEquity) < 0.01 : true;
+  const isBalanced = data ? Math.abs(data.totalAssets - liabilitiesPlusEquity) < 0.01 : false;
 
   return (
     <div className="space-y-6">
@@ -115,7 +117,7 @@ const BalanceSheet: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600"><Wallet className="h-5 w-5" /></div>
             <div>
-              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalAssets || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p>
+              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalAssets || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="text-xs text-slate-500 font-medium">Total Assets</p>
             </div>
           </div>
@@ -124,7 +126,7 @@ const BalanceSheet: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-rose-50 flex items-center justify-center text-rose-600"><TrendingDown className="h-5 w-5" /></div>
             <div>
-              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalLiabilities || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p>
+              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalLiabilities || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="text-xs text-slate-500 font-medium">Total Liabilities</p>
             </div>
           </div>
@@ -133,7 +135,7 @@ const BalanceSheet: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-11 w-11 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600"><Landmark className="h-5 w-5" /></div>
             <div>
-              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalEquity || 0).toLocaleString(undefined, { minimumFractionDigits: 0 })}</p>
+              <p className="text-xl font-bold text-slate-900">SAR {(data?.totalEquity || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="text-xs text-slate-500 font-medium">Total Equity</p>
             </div>
           </div>

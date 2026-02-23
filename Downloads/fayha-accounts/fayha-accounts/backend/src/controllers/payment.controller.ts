@@ -46,6 +46,9 @@ export const paymentController = {
       if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
 
       const paymentAmount = Number(amount);
+      if (!paymentAmount || paymentAmount <= 0) {
+        return res.status(400).json({ success: false, error: 'Payment amount must be greater than zero' });
+      }
       if (paymentAmount > Number(invoice.balanceDue)) {
         return res.status(400).json({ success: false, error: 'Payment exceeds balance due' });
       }
@@ -152,6 +155,9 @@ export const paymentController = {
       if (!bill) return res.status(404).json({ success: false, error: 'Bill not found' });
 
       const paymentAmount = Number(amount);
+      if (!paymentAmount || paymentAmount <= 0) {
+        return res.status(400).json({ success: false, error: 'Payment amount must be greater than zero' });
+      }
       if (paymentAmount > Number(bill.balanceDue)) {
         return res.status(400).json({ success: false, error: 'Payment exceeds balance due' });
       }

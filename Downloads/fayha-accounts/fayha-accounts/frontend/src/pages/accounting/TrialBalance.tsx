@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import PageHeader from '../../components/common/PageHeader';
 import { accountingApi } from '../../services/api';
+import toast from 'react-hot-toast';
 import { Scale, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2, Printer, RefreshCw } from 'lucide-react';
 
 interface TrialBalanceRow {
@@ -22,7 +23,8 @@ const TrialBalance: React.FC = () => {
     try {
       const data = await accountingApi.getTrialBalance();
       setRows(Array.isArray(data) ? data : (data?.accounts || []));
-    } catch {
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load trial balance');
       setRows([]);
     }
     setLoading(false);

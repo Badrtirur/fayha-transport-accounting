@@ -27,6 +27,10 @@ app.use(cors({
       callback(null, true);
     } else if (origin?.endsWith('.railway.app') || origin?.endsWith('.up.railway.app')) {
       callback(null, true);
+    } else if (origin?.endsWith('.pages.dev') || origin?.endsWith('.workers.dev')) {
+      callback(null, true);
+    } else if (origin?.endsWith('.trycloudflare.com')) {
+      callback(null, true);
     } else {
       callback(null, config.corsOrigin || true);
     }

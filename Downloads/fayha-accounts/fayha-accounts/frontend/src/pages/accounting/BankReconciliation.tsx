@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import PageHeader from '../../components/common/PageHeader';
 import { banksApi, journalsApi, accountsApi } from '../../services/api';
+import toast from 'react-hot-toast';
 import { Landmark, CheckCircle2, Clock, RefreshCw, ArrowDownLeft, ArrowUpRight, Search } from 'lucide-react';
 
 interface BankAccount {
@@ -55,9 +56,10 @@ const BankReconciliation: React.FC = () => {
         const acctList = acctData.status === 'fulfilled' && Array.isArray(acctData.value) ? acctData.value : [];
 
         // Merge GL bank accounts if they aren't in the banks list
-        const glBanks = acctList.filter((a: any) =>
-          BANK_CODES.includes(a.code) || a.subType === 'Bank' || a.sub === 'bank' || a.subtype === 'bank'
-        );
+        const glBanks = acctList.filter((a: any) => {
+          const st = (a.subType || a.sub || a.subtype || '').toUpperCase();
+          return BANK_CODES.includes(a.code) || st === 'BANK';
+        });
 
         // Combine: use real bank accounts first, then fill from GL accounts
         const merged: BankAccount[] = [];
@@ -85,8 +87,8 @@ const BankReconciliation: React.FC = () => {
           setSelectedBankId(merged[0].id);
           setSelectedBankCode(merged[0].code);
         }
-      } catch {
-        // silent
+      } catch (err: any) {
+        toast.error(err?.message || 'Failed to load bank accounts');
       }
     };
     loadData();
@@ -174,7 +176,8 @@ const BankReconciliation: React.FC = () => {
       }
 
       setTransactions(bankTxns);
-    } catch {
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load transactions');
       setTransactions([]);
     }
     setLoading(false);
