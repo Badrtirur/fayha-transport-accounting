@@ -124,7 +124,14 @@ const PaymentEntryForm: React.FC = () => {
   useEffect(() => {
     const formatJR = (j: any) => {
       const refNo = j.jobRefNo || j.jobNumber || j.id;
-      return { value: j.id, label: `${refNo} — [${j.status || 'N/A'}]` };
+      // Show invoice total amount in dropdown for quick reference
+      const jobInvs = allInvoices.filter((inv: any) => inv.jobReferenceId === j.id);
+      const totalDue = jobInvs.reduce((s: number, inv: any) => s + (inv.balanceDue ?? inv.totalAmount ?? 0), 0);
+      const totalAmount = jobInvs.reduce((s: number, inv: any) => s + (inv.totalAmount ?? 0), 0);
+      const amountLabel = jobInvs.length > 0
+        ? ` — ${fmtSAR(totalAmount)}${totalDue > 0 && totalDue !== totalAmount ? ` (Due: ${fmtSAR(totalDue)})` : ''}`
+        : '';
+      return { value: j.id, label: `${refNo} — [${j.status || 'N/A'}]${amountLabel}` };
     };
     // A job should be hidden if ALL its invoices are PAID and have payment entries
     const hasUnpaidInvoice = (j: any) => {
