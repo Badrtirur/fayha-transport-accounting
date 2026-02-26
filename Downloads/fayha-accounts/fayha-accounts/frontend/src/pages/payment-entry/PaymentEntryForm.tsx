@@ -12,10 +12,15 @@ import {
   Receipt,
   Building2,
   FileText,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  CreditCard,
+  Briefcase,
 } from 'lucide-react';
 import type { PaymentMethodType } from '../../types';
 import type { JobReference } from '../../types';
-import { customersApi, jobReferencesApi, paymentEntriesApi, accountsApi, salesInvoicesApi, clientAdvancesApi } from '../../services/api';
+import { customersApi, jobReferencesApi, paymentEntriesApi, accountsApi, salesInvoicesApi, clientAdvancesApi, rcvPvcApi } from '../../services/api';
 import SearchableSelect from '../../components/common/SearchableSelect';
 import type { OptionGroup } from '../../components/common/SearchableSelect';
 import BalanceBar from '../../components/common/BalanceBar';
@@ -53,6 +58,7 @@ const PaymentEntryForm: React.FC = () => {
   const [costOptions, setCostOptions] = useState<{ value: string; label: string }[]>([]);
   const [allInvoices, setAllInvoices] = useState<any[]>([]);
   const [existingPayments, setExistingPayments] = useState<any[]>([]);
+  const [allVouchers, setAllVouchers] = useState<any[]>([]);
 
   // Form state
   const [clientId, setClientId] = useState('');
@@ -121,9 +127,11 @@ const PaymentEntryForm: React.FC = () => {
       accountsApi.getAll(),
       salesInvoicesApi.getAll(),
       paymentEntriesApi.getAll().catch(() => []),
-    ]).then(([clientList, jrList, accountList, invoiceList, peList]) => {
+      rcvPvcApi.getAll().catch(() => []),
+    ]).then(([clientList, jrList, accountList, invoiceList, peList, voucherList]) => {
       // Existing payment entries (to check duplicates)
       setExistingPayments(Array.isArray(peList) ? peList : []);
+      setAllVouchers(Array.isArray(voucherList) ? voucherList : []);
 
       // Clients — grouped by clientType
       const clients = Array.isArray(clientList) ? clientList : [];
@@ -337,6 +345,93 @@ const PaymentEntryForm: React.FC = () => {
     () => allJobRefs.find((j: any) => j.id === jobRefId),
     [jobRefId, allJobRefs]
   );
+
+  // ── Client-level financial summary (derived from ALL loaded data) ──
+  const clientFinancials = useMemo(() => {
+    if (!clientId || !selectedClient) return null;
+    const clientInvs = allInvoices.filter((inv: any) => inv.clientId === clientId);
+    const clientPayments = existingPayments.filter((pe: any) =>
+      pe.clientId === clientId || pe.meta?.clientId === clientId
+    );
+    // RCV = Receipt Vouchers (money IN from client), PVC = Payment Vouchers (money OUT to client)
+    const clientRcv = allVouchers.filter((v: any) => v.clientId === clientId && v.type === 'RCV');
+    const clientPvc = allVouchers.filter((v: any) => v.clientId === clientId && v.type === 'PVC');
+
+    const totalInvoiced = selectedClient.totalInvoiced || clientInvs.reduce((s: number, inv: any) => s + (inv.totalAmount || 0), 0);
+
+    // Total received = payment entries + receipt vouchers
+    const peTotal = clientPayments.reduce((s: number, pe: any) => s + (pe.totalDr || 0), 0);
+    const rcvTotal = clientRcv.reduce((s: number, v: any) => s + (v.amount || 0), 0);
+    const totalPaid = selectedClient.totalPaid || (peTotal + rcvTotal);
+
+    // Total paid out to client (refunds / payment vouchers)
+    const pvcTotal = clientPvc.reduce((s: number, v: any) => s + (v.amount || 0), 0);
+
+    const outstanding = selectedClient.outstandingBalance ?? (totalInvoiced - totalPaid);
+    const creditLimit = selectedClient.creditLimit || 0;
+    const creditUsedPct = creditLimit > 0 ? Math.min(100, (outstanding / creditLimit) * 100) : 0;
+
+    // Invoice status breakdown
+    const invByStatus = { DRAFT: 0, INVOICED: 0, PARTIAL: 0, PAID: 0 };
+    clientInvs.forEach((inv: any) => {
+      const st = inv.status as keyof typeof invByStatus;
+      if (st in invByStatus) invByStatus[st]++;
+    });
+
+    // Payment method breakdown (across payment entries + vouchers)
+    const byMethod: Record<string, number> = {};
+    clientPayments.forEach((pe: any) => {
+      const m = pe.method || 'Other';
+      byMethod[m] = (byMethod[m] || 0) + (pe.totalDr || 0);
+    });
+    clientRcv.forEach((v: any) => {
+      byMethod['Cash (RCV)'] = (byMethod['Cash (RCV)'] || 0) + (v.amount || 0);
+    });
+
+    // Build unified recent transactions from all sources
+    const allTransactions: any[] = [
+      ...clientPayments.map((pe: any) => ({
+        id: pe.id,
+        ref: pe.documentId || pe.id?.slice(0, 8),
+        date: pe.documentDate || pe.createdAt,
+        amount: pe.totalDr || pe.totalCr || 0,
+        type: 'PE' as const,
+        method: pe.method || '—',
+        direction: 'in' as const,
+      })),
+      ...clientRcv.map((v: any) => ({
+        id: v.id,
+        ref: v.voucherNo || v.id?.slice(0, 8),
+        date: v.date || v.createdAt,
+        amount: v.amount || 0,
+        type: 'RCV' as const,
+        method: 'Cash',
+        direction: 'in' as const,
+      })),
+      ...clientPvc.map((v: any) => ({
+        id: v.id,
+        ref: v.voucherNo || v.id?.slice(0, 8),
+        date: v.date || v.createdAt,
+        amount: v.amount || 0,
+        type: 'PVC' as const,
+        method: 'Cash',
+        direction: 'out' as const,
+      })),
+    ].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime())
+     .slice(0, 8);
+
+    const totalJobs = selectedClient.totalJobs || allJobRefs.filter((j: any) => j.clientId === clientId).length;
+    const totalInvoices = selectedClient.totalInvoices || clientInvs.length;
+
+    return {
+      totalInvoiced, totalPaid, outstanding, creditLimit, creditUsedPct,
+      invByStatus, byMethod, pvcTotal,
+      recentTransactions: allTransactions,
+      totalJobs, totalInvoices,
+      peCount: clientPayments.length, rcvCount: clientRcv.length, pvcCount: clientPvc.length,
+      paymentTermDays: selectedClient.paymentTermDays || 30,
+    };
+  }, [clientId, selectedClient, allInvoices, existingPayments, allVouchers, allJobRefs]);
 
   // Compute selected cost items with amounts
   const selectedCostDetails = useMemo(() => {
@@ -567,6 +662,145 @@ const PaymentEntryForm: React.FC = () => {
             placeholder={clientId ? 'Select job reference...' : 'Select client first...'}
           />
         </div>
+
+        {/* ── Client Financial Summary Panel ── */}
+        {clientId && clientFinancials && (
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-blue-50/30 overflow-hidden">
+            {/* Header */}
+            <div className="px-5 py-3 bg-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Building2 className="h-4.5 w-4.5 text-slate-300" />
+                <div>
+                  <p className="text-sm font-bold text-white">{selectedClient?.name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {selectedClient?.clientType || 'Client'} &middot; {clientFinancials.paymentTermDays} day terms
+                    {selectedClient?.vatNumber ? ` · VAT: ${selectedClient.vatNumber}` : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                <span><Briefcase className="h-3 w-3 inline mr-0.5" />{clientFinancials.totalJobs} Jobs</span>
+                <span><FileText className="h-3 w-3 inline mr-0.5" />{clientFinancials.totalInvoices} Invoices</span>
+              </div>
+            </div>
+
+            {/* KPI Cards Row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-slate-100">
+              {/* Total Invoiced */}
+              <div className="bg-white p-4 space-y-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <TrendingUp className="h-3.5 w-3.5 text-blue-500" /> Invoiced
+                </div>
+                <p className="text-lg font-bold text-slate-900">{fmtSAR(clientFinancials.totalInvoiced)}</p>
+                <div className="flex gap-2 text-[10px] text-slate-400">
+                  <span className="text-amber-600">{clientFinancials.invByStatus.INVOICED} unpaid</span>
+                  <span className="text-orange-500">{clientFinancials.invByStatus.PARTIAL} partial</span>
+                  <span className="text-emerald-600">{clientFinancials.invByStatus.PAID} paid</span>
+                </div>
+              </div>
+
+              {/* Total Received (all sources: PE + RCV) */}
+              <div className="bg-white p-4 space-y-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <TrendingDown className="h-3.5 w-3.5 text-emerald-500" /> Received
+                </div>
+                <p className="text-lg font-bold text-emerald-700">{fmtSAR(clientFinancials.totalPaid)}</p>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px]">
+                  {Object.entries(clientFinancials.byMethod).map(([method, amount]) => (
+                    <span key={method} className="text-slate-500">
+                      <span className="font-semibold">{method}:</span> {fmtSAR(amount as number)}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  {clientFinancials.peCount} entries · {clientFinancials.rcvCount} receipts
+                  {clientFinancials.totalInvoiced > 0
+                    ? ` · ${Math.round((clientFinancials.totalPaid / clientFinancials.totalInvoiced) * 100)}% collected`
+                    : ''}
+                </p>
+              </div>
+
+              {/* Outstanding Balance */}
+              <div className="bg-white p-4 space-y-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <Wallet className="h-3.5 w-3.5 text-rose-500" /> Outstanding
+                </div>
+                <p className={`text-lg font-bold ${clientFinancials.outstanding > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {fmtSAR(clientFinancials.outstanding)}
+                </p>
+                {clientFinancials.pvcTotal > 0 && (
+                  <p className="text-[10px] text-amber-600 font-medium">
+                    {fmtSAR(clientFinancials.pvcTotal)} paid out ({clientFinancials.pvcCount} vouchers)
+                  </p>
+                )}
+                {advanceTotalAvailable > 0 && (
+                  <p className="text-[10px] text-emerald-600 font-medium">
+                    + {fmtSAR(advanceTotalAvailable)} advance available
+                  </p>
+                )}
+              </div>
+
+              {/* Credit Limit */}
+              <div className="bg-white p-4 space-y-1">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <CreditCard className="h-3.5 w-3.5 text-indigo-500" /> Credit Limit
+                </div>
+                <p className="text-lg font-bold text-slate-900">
+                  {clientFinancials.creditLimit > 0 ? fmtSAR(clientFinancials.creditLimit) : 'No limit'}
+                </p>
+                {clientFinancials.creditLimit > 0 && (
+                  <div className="space-y-0.5">
+                    <div className="w-full h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          clientFinancials.creditUsedPct > 90 ? 'bg-rose-500' : clientFinancials.creditUsedPct > 70 ? 'bg-amber-500' : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${clientFinancials.creditUsedPct}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400">{Math.round(clientFinancials.creditUsedPct)}% used</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Recent Transactions — ALL types: Payment Entries, Receipt Vouchers, Payment Vouchers */}
+            {clientFinancials.recentTransactions.length > 0 && (
+              <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50">
+                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Recent Transactions</p>
+                <div className="flex flex-wrap gap-2">
+                  {clientFinancials.recentTransactions.map((tx: any) => (
+                    <div key={tx.id} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] ${
+                      tx.direction === 'out' ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'
+                    }`}>
+                      {/* Direction arrow */}
+                      <span className={`text-[9px] font-bold ${tx.direction === 'in' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {tx.direction === 'in' ? '\u2193' : '\u2191'}
+                      </span>
+                      {/* Type badge */}
+                      <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                        tx.type === 'PE' ? 'bg-indigo-100 text-indigo-700'
+                          : tx.type === 'RCV' ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-rose-100 text-rose-700'
+                      }`}>{tx.type}</span>
+                      <span className="font-semibold text-slate-700">{tx.ref}</span>
+                      <span className="text-slate-400">
+                        {tx.date ? new Date(tx.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : ''}
+                      </span>
+                      <span className={`font-bold ${tx.direction === 'in' ? 'text-emerald-700' : 'text-rose-600'}`}>
+                        {tx.direction === 'out' ? '- ' : ''}{fmtSAR(tx.amount)}
+                      </span>
+                      {/* Method badge */}
+                      <span className={`px-1 py-0.5 rounded text-[9px] font-bold ${
+                        tx.method === 'Cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                      }`}>{tx.method}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Advance Balance Panel */}
         {clientId && advanceTotalAvailable > 0 && (
