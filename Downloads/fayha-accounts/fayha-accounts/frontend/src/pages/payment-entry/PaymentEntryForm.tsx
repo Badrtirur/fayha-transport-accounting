@@ -17,6 +17,7 @@ import type { PaymentMethodType } from '../../types';
 import type { JobReference } from '../../types';
 import { customersApi, jobReferencesApi, paymentEntriesApi, accountsApi, salesInvoicesApi, clientAdvancesApi } from '../../services/api';
 import SearchableSelect from '../../components/common/SearchableSelect';
+import type { OptionGroup } from '../../components/common/SearchableSelect';
 import BalanceBar from '../../components/common/BalanceBar';
 
 
@@ -38,12 +39,17 @@ const PaymentEntryForm: React.FC = () => {
 
   // Dropdown options
   const [clientOptions, setClientOptions] = useState<{ value: string; label: string }[]>([]);
+  const [clientGroups, setClientGroups] = useState<OptionGroup[]>([]);
   const [jobRefOptions, setJobRefOptions] = useState<{ value: string; label: string }[]>([]);
+  const [jobRefGroups, setJobRefGroups] = useState<OptionGroup[]>([]);
   const [allJobRefs, setAllJobRefs] = useState<JobReference[]>([]);
   const [allClients, setAllClients] = useState<any[]>([]);
   const [ledgerOptions, setLedgerOptions] = useState<{ value: string; label: string }[]>([]);
+  const [ledgerGroups, setLedgerGroups] = useState<OptionGroup[]>([]);
   const [operationAccounts, setOperationAccounts] = useState<{ value: string; label: string }[]>([]);
+  const [operationGroups, setOperationGroups] = useState<OptionGroup[]>([]);
   const [invoiceOptions, setInvoiceOptions] = useState<{ value: string; label: string }[]>([]);
+  const [invoiceGroups, setInvoiceGroups] = useState<OptionGroup[]>([]);
   const [costOptions, setCostOptions] = useState<{ value: string; label: string }[]>([]);
   const [allInvoices, setAllInvoices] = useState<any[]>([]);
   const [existingPayments, setExistingPayments] = useState<any[]>([]);
@@ -68,6 +74,45 @@ const PaymentEntryForm: React.FC = () => {
   const [applyAdvance, setApplyAdvance] = useState(false);
   const [advanceApplyAmount, setAdvanceApplyAmount] = useState(0);
 
+  // Helper: group an array of options by a key extractor
+  const buildGroups = (
+    items: any[],
+    toOption: (item: any) => { value: string; label: string },
+    groupKey: (item: any) => string,
+    groupOrder?: string[]
+  ): { options: { value: string; label: string }[]; groups: OptionGroup[] } => {
+    const opts = items.map(toOption);
+    const map = new Map<string, { value: string; label: string }[]>();
+    items.forEach((item, i) => {
+      const key = groupKey(item) || 'Other';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(opts[i]);
+    });
+    const order = groupOrder || Array.from(map.keys()).sort();
+    const groups: OptionGroup[] = order
+      .filter(k => map.has(k))
+      .map(k => ({ label: k, options: map.get(k)! }));
+    // Add any keys not in the order
+    for (const [k, v] of map) {
+      if (!order.includes(k)) groups.push({ label: k, options: v });
+    }
+    return { options: opts, groups };
+  };
+
+  // Helper: build account groups (exclude parent/group accounts, group by type)
+  const buildAccountGroups = (accounts: any[]) => {
+    const leafAccounts = accounts.filter((a: any) => {
+      const hasChildren = accounts.some((c: any) => c.parentId === a.id);
+      return !hasChildren;
+    });
+    return buildGroups(
+      leafAccounts,
+      (a: any) => ({ value: a.id, label: `[${a.code}] ${a.name}` }),
+      (a: any) => a.type || 'Other',
+      ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense']
+    );
+  };
+
   // Load all dropdown data
   useEffect(() => {
     Promise.all([
@@ -79,24 +124,31 @@ const PaymentEntryForm: React.FC = () => {
     ]).then(([clientList, jrList, accountList, invoiceList, peList]) => {
       // Existing payment entries (to check duplicates)
       setExistingPayments(Array.isArray(peList) ? peList : []);
-      // Clients
+
+      // Clients — grouped by clientType
       const clients = Array.isArray(clientList) ? clientList : [];
       setAllClients(clients);
-      setClientOptions(clients.map((c: any) => ({ value: c.id, label: c.name })));
+      const clientResult = buildGroups(
+        clients,
+        (c: any) => ({ value: c.id, label: c.name }),
+        (c: any) => c.clientType || 'Other',
+        ['Business Client', 'Shipper', 'Consignee']
+      );
+      setClientOptions(clientResult.options);
+      setClientGroups(clientResult.groups);
 
       // Job References
       const jrs = Array.isArray(jrList) ? jrList : [];
       setAllJobRefs(jrs);
       setJobRefOptions(jrs.map((j: any) => ({ value: j.id, label: `${j.jobRefNo || j.jobNumber || j.id} — [${j.status || 'N/A'}]` })));
 
-      // Accounts — split into ledger accounts and operation accounts
+      // Accounts — grouped by type, excluding parent accounts
       const accounts = Array.isArray(accountList) ? accountList : [];
-      const allAccOpts = accounts.map((a: any) => ({
-        value: a.id,
-        label: `[${a.code}] ${a.name}${a.type ? ' - (' + a.type + ')' : ''}`,
-      }));
-      setLedgerOptions(allAccOpts);
-      setOperationAccounts(allAccOpts);
+      const accResult = buildAccountGroups(accounts);
+      setLedgerOptions(accResult.options);
+      setLedgerGroups(accResult.groups);
+      setOperationAccounts(accResult.options);
+      setOperationGroups(accResult.groups);
 
       // Sales Invoices
       const invs = Array.isArray(invoiceList) ? invoiceList : [];
@@ -131,7 +183,7 @@ const PaymentEntryForm: React.FC = () => {
       const amountLabel = jobInvs.length > 0
         ? ` — ${fmtSAR(totalAmount)}${totalDue > 0 && totalDue !== totalAmount ? ` (Due: ${fmtSAR(totalDue)})` : ''}`
         : '';
-      return { value: j.id, label: `${refNo} — [${j.status || 'N/A'}]${amountLabel}` };
+      return { value: j.id, label: `${refNo}${amountLabel}` };
     };
     // A job should be hidden if ALL its invoices are PAID and have payment entries
     const hasUnpaidInvoice = (j: any) => {
@@ -139,17 +191,29 @@ const PaymentEntryForm: React.FC = () => {
       if (jobInvs.length === 0) return true; // no invoices yet — still show
       return jobInvs.some((inv: any) => inv.status !== 'PAID' && !paidInvoiceIds.has(inv.id));
     };
+
+    const buildJobRefGroups = (jobs: any[]) => {
+      const result = buildGroups(
+        jobs,
+        formatJR,
+        (j: any) => j.status || 'Other',
+        ['Active', 'In Progress', 'Invoiced', 'Customs Cleared']
+      );
+      setJobRefOptions(result.options);
+      setJobRefGroups(result.groups);
+    };
+
     if (clientId) {
       const filtered = allJobRefs
         .filter((j: any) => j.clientId === clientId)
         .filter(hasUnpaidInvoice);
-      setJobRefOptions(filtered.map(formatJR));
+      buildJobRefGroups(filtered);
       // Reset child selections when client changes
       setJobRefId('');
       setInvoiceId('');
       setCostItemIds([]);
     } else {
-      setJobRefOptions(allJobRefs.filter(hasUnpaidInvoice).map(formatJR));
+      buildJobRefGroups(allJobRefs.filter(hasUnpaidInvoice));
     }
   }, [clientId, allInvoices, paidInvoiceIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -189,15 +253,22 @@ const PaymentEntryForm: React.FC = () => {
       .filter((inv: any) => inv.jobReferenceId === jobRefId)
       .filter(isPayable);
 
+    const fmtInv = (inv: any) => ({
+      value: inv.id,
+      label: `${inv.invoiceNumber || inv.id} — SAR ${((inv.balanceDue ?? inv.totalAmount) || 0).toLocaleString('en', { minimumFractionDigits: 2 })}`,
+    });
+    const buildInvGroups = (invs: any[]) => {
+      const result = buildGroups(invs, fmtInv, (inv: any) => inv.status || 'Other', ['INVOICED', 'PARTIAL']);
+      setInvoiceOptions(result.options);
+      setInvoiceGroups(result.groups);
+    };
+
     if (jobInvoices.length === 0) {
       // Fallback: show client invoices if job has none
       const clientInvs = clientId
         ? allInvoices.filter((inv: any) => inv.clientId === clientId).filter(isPayable)
         : [];
-      setInvoiceOptions(clientInvs.map((inv: any) => ({
-        value: inv.id,
-        label: `${inv.invoiceNumber || inv.id} — ${inv.status} — SAR ${((inv.balanceDue ?? inv.totalAmount) || 0).toLocaleString('en', { minimumFractionDigits: 2 })}`,
-      })));
+      buildInvGroups(clientInvs);
       setInvoiceId('');
       setCostItemIds([]);
       return;
@@ -206,10 +277,7 @@ const PaymentEntryForm: React.FC = () => {
     // Auto-select the first unpaid invoice for this job
     const autoInv = jobInvoices[0];
     setInvoiceId(autoInv.id);
-    setInvoiceOptions(jobInvoices.map((inv: any) => ({
-      value: inv.id,
-      label: `${inv.invoiceNumber || inv.id} — ${inv.status} — SAR ${((inv.balanceDue ?? inv.totalAmount) || 0).toLocaleString('en', { minimumFractionDigits: 2 })}`,
-    })));
+    buildInvGroups(jobInvoices);
 
     // Auto-select ALL cost items from the invoice
     const items = autoInv.items || [];
@@ -484,6 +552,7 @@ const PaymentEntryForm: React.FC = () => {
             label="Client"
             required
             options={clientOptions}
+            groups={clientGroups}
             value={clientId}
             onChange={setClientId}
             placeholder="Search client..."
@@ -492,6 +561,7 @@ const PaymentEntryForm: React.FC = () => {
             label="Job ID / Job Ref."
             required
             options={jobRefOptions}
+            groups={jobRefGroups}
             value={jobRefId}
             onChange={setJobRefId}
             placeholder={clientId ? 'Select job reference...' : 'Select client first...'}
@@ -577,6 +647,7 @@ const PaymentEntryForm: React.FC = () => {
                 <div className="w-64">
                   <SearchableSelect
                     options={invoiceOptions}
+                    groups={invoiceGroups}
                     value={invoiceId}
                     onChange={handleInvoiceChange}
                     placeholder="Switch invoice..."
@@ -878,6 +949,7 @@ const PaymentEntryForm: React.FC = () => {
             label="Select Ledger For Accounting"
             required
             options={ledgerOptions}
+            groups={ledgerGroups}
             value={ledgerAccountId}
             onChange={setLedgerAccountId}
             placeholder="Search ledger account..."
@@ -922,6 +994,7 @@ const PaymentEntryForm: React.FC = () => {
               <div className="col-span-5">
                 <SearchableSelect
                   options={operationAccounts}
+                  groups={operationGroups}
                   value={line.accountId}
                   onChange={(val) => {
                     handleLineChange(line.id, 'accountId', val);
