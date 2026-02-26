@@ -24,6 +24,7 @@ import IncomeStatement from './pages/accounting/IncomeStatement';
 import AgingReports from './pages/accounting/AgingReports';
 import BankReconciliation from './pages/accounting/BankReconciliation';
 import BankAccounts from './pages/accounting/BankAccounts';
+import AccountDetail from './pages/accounting/AccountDetail';
 import AssetList from './pages/assets/AssetList';
 import BillList from './pages/purchases/BillList';
 import FinancialReports from './pages/reports/FinancialReports';
@@ -185,6 +186,7 @@ const AppRoutes: React.FC = () => {
                 <Route path="accounting/income-statement" element={<IncomeStatement />} />
                 <Route path="accounting/aging-reports" element={<AgingReports />} />
                 <Route path="accounting/bank-reconciliation" element={<BankReconciliation />} />
+                <Route path="accounting/account/:accountId" element={<AccountDetail />} />
                 <Route path="accounting/bank-accounts" element={<BankAccounts />} />
                 <Route path="accounting/assets" element={<AssetList />} />
                 {/* Legacy accounting routes */}

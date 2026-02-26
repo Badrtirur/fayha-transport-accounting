@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { dashboardApi } from '../../services/api';
 import toast from 'react-hot-toast';
 import { TrendingUp, TrendingDown, DollarSign, Percent, Printer, RefreshCw } from 'lucide-react';
 
 interface PLAccount {
+  accountId?: string;
   accountCode: string;
   accountName: string;
   subType: string;
@@ -21,6 +23,7 @@ interface IncomeStatementData {
 }
 
 const IncomeStatement: React.FC = () => {
+  const navigate = useNavigate();
   const [data, setData] = useState<IncomeStatementData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -144,9 +147,9 @@ const IncomeStatement: React.FC = () => {
                 {data.revenue.length === 0 ? (
                   <tr><td colSpan={4} className="py-8 text-center text-sm text-slate-400">No revenue accounts</td></tr>
                 ) : data.revenue.map((item) => (
-                  <tr key={item.accountCode} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0">
+                  <tr key={item.accountCode} onClick={() => item.accountId && navigate(`/accounting/account/${item.accountId}`)} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0 cursor-pointer">
                     <td className="py-3 px-4 text-slate-500 font-mono text-sm font-semibold">{item.accountCode}</td>
-                    <td className="py-3 px-4 text-sm font-medium text-slate-800">{item.accountName}</td>
+                    <td className="py-3 px-4 text-sm font-medium text-blue-700 hover:text-blue-900 underline decoration-blue-200 hover:decoration-blue-500">{item.accountName}</td>
                     <td className="py-3 px-4"><span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">{item.subType || 'Revenue'}</span></td>
                     <td className="py-3 px-4 text-right text-sm font-bold text-emerald-700">{(item.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   </tr>
@@ -185,9 +188,9 @@ const IncomeStatement: React.FC = () => {
                 {data.expenses.length === 0 ? (
                   <tr><td colSpan={4} className="py-8 text-center text-sm text-slate-400">No expense accounts</td></tr>
                 ) : data.expenses.map((item) => (
-                  <tr key={item.accountCode} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0">
+                  <tr key={item.accountCode} onClick={() => item.accountId && navigate(`/accounting/account/${item.accountId}`)} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0 cursor-pointer">
                     <td className="py-3 px-4 text-slate-500 font-mono text-sm font-semibold">{item.accountCode}</td>
-                    <td className="py-3 px-4 text-sm font-medium text-slate-800">{item.accountName}</td>
+                    <td className="py-3 px-4 text-sm font-medium text-blue-700 hover:text-blue-900 underline decoration-blue-200 hover:decoration-blue-500">{item.accountName}</td>
                     <td className="py-3 px-4"><span className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded-lg">{item.subType || 'Expense'}</span></td>
                     <td className="py-3 px-4 text-right text-sm font-bold text-red-700">{(item.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                   </tr>

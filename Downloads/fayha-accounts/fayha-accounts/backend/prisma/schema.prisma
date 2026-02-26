@@ -495,11 +495,13 @@ model Invoice {
   paidAmount      Float     @default(0)
   balanceDue      Float
   status          String    @default("DRAFT")
-  zatcaUuid       String?
-  zatcaHash       String?
-  zatcaQrCode     String?
-  zatcaStatus     String?
-  journalEntryId  String?   @unique
+  zatcaUuid         String?
+  zatcaHash         String?
+  zatcaQrCode       String?
+  zatcaStatus       String?
+  zatcaClearanceId  String?
+  zatcaClearedAt    DateTime?
+  journalEntryId    String?   @unique
   paymentTermDays Int       @default(30)
   notes           String?
   internalNotes   String?
@@ -589,10 +591,13 @@ model SalesInvoice {
   paidAmount      Float     @default(0)
   balanceDue      Float     @default(0)
   status          String    @default("DRAFT")
-  zatcaStatus     String    @default("PENDING")
-  zatcaUuid       String?
-  zatcaQrCode     String?
-  paymentTermDays Int       @default(30)
+  zatcaStatus       String    @default("Due")
+  zatcaUuid         String?
+  zatcaHash         String?
+  zatcaQrCode       String?
+  zatcaClearanceId  String?
+  zatcaClearedAt    DateTime?
+  paymentTermDays   Int       @default(30)
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import { invoicesApi, customersApi, jobReferencesApi, settingsApi, banksApi } from '../../services/api';
 import { Invoice } from '../../types';
 import { Printer, ArrowLeft, Download, Mail, Shield } from 'lucide-react';
+import QRCode from 'qrcode';
+import { buildZatcaTlv } from '../../utils/zatca';
 
 const DEFAULT_COMPANY = {
     name: 'Fayha Clearance LLC',
@@ -25,6 +27,20 @@ const InvoicePreview: React.FC = () => {
     const [jobRef, setJobRef] = useState<any>(null);
     const [companyInfo, setCompanyInfo] = useState(DEFAULT_COMPANY);
     const [banks, setBanks] = useState<any[]>([]);
+    const [qrDataUrl, setQrDataUrl] = useState('');
+
+    // Generate ZATCA QR code when invoice data is available
+    useEffect(() => {
+        if (!invoice) return;
+        const totalAmount = Number(invoice.totalAmount || 0);
+        const vatAmount = Number(invoice.vatAmount || 0);
+        const issueDate = (invoice as any).issueDate || invoice.date;
+        const timestamp = issueDate ? new Date(issueDate).toISOString() : new Date().toISOString();
+        const tlvBase64 = buildZatcaTlv(companyInfo.name, companyInfo.vatNumber, timestamp, totalAmount, vatAmount);
+        QRCode.toDataURL(tlvBase64, { width: 120, margin: 1, color: { dark: '#000000', light: '#ffffff' } })
+            .then(url => setQrDataUrl(url))
+            .catch(() => setQrDataUrl(''));
+    }, [invoice, companyInfo]);
 
     useEffect(() => {
         if (!id) {
@@ -298,20 +314,27 @@ const InvoicePreview: React.FC = () => {
                     <div className="mt-8 flex items-end gap-6 justify-between border-t-2 border-slate-200 pt-6">
                         <div className="flex gap-5">
                             <div className="h-28 w-28 bg-white border-2 border-slate-900 p-1.5 rounded-lg">
-                                <div className="h-full w-full bg-slate-900 rounded flex items-center justify-center text-white text-[9px] text-center font-bold leading-tight">
-                                    ZATCA<br />QR CODE<br />PHASE 2
-                                </div>
+                                {qrDataUrl ? (
+                                    <img src={qrDataUrl} alt="ZATCA QR Code" className="h-full w-full rounded" />
+                                ) : (
+                                    <div className="h-full w-full bg-slate-900 rounded flex items-center justify-center text-white text-[9px] text-center font-bold leading-tight">
+                                        ZATCA<br />QR CODE
+                                    </div>
+                                )}
                             </div>
                             <div className="flex flex-col justify-end space-y-1.5">
                                 <div className="flex items-center gap-1.5 text-xs text-emerald-600 font-semibold">
                                     <Shield className="h-3.5 w-3.5" />
-                                    ZATCA Phase 2 Compliant
+                                    ZATCA Phase 1 Compliant
                                 </div>
-                                <p className="text-[9px] font-mono text-slate-400 max-w-[220px] break-all">
-                                    UUID: {invoice.zatca?.uuid || '8f8e3-8shda-282jd-282jds-282js'}
+                                <p className="text-[9px] text-slate-500">
+                                    Status: <span className={(invoice as any).zatcaStatus === 'GENERATED' ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}>{(invoice as any).zatcaStatus || 'PENDING'}</span>
                                 </p>
                                 <p className="text-[9px] font-mono text-slate-400 max-w-[220px] break-all">
-                                    HASH: {invoice.zatca?.previousHash || '0000000000'}
+                                    UUID: {(invoice as any).zatcaUuid || '-'}
+                                </p>
+                                <p className="text-[9px] font-mono text-slate-400 max-w-[220px] break-all">
+                                    HASH: {(invoice as any).zatcaHash || '-'}
                                 </p>
                             </div>
                         </div>

@@ -6,6 +6,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/database';
 import { generateNumber } from '../utils/helpers';
+import { generateZatcaFields, simulateZatcaReport } from '../utils/zatca';
 import * as XLSX from 'xlsx';
 
 interface CrudOptions {
@@ -389,10 +390,34 @@ export const salesInvoiceController = {
         totalAmount: Number(item.totalAmount || item.total) || 0,
       }));
 
+      // Generate ZATCA Phase 1 fields
+      const companySettings = await prisma.setting.findMany({
+        where: { key: { in: ['COMPANY_NAME', 'COMPANY_VAT_NUMBER'] } },
+      });
+      const settingsMap: Record<string, string> = {};
+      for (const s of companySettings) settingsMap[s.key] = s.value;
+
+      const zatca = generateZatcaFields(
+        {
+          invoiceNumber: data.invoiceNumber,
+          issueDate: data.invoiceDate,
+          totalAmount: data.totalAmount || 0,
+          vatAmount: data.vatAmount || 0,
+        },
+        {
+          sellerName: settingsMap['COMPANY_NAME'] || 'Fayha Arabia Logistics',
+          vatNumber: settingsMap['COMPANY_VAT_NUMBER'] || '311467026900003',
+        },
+      );
+
       const invoice = await prisma.$transaction(async (tx) => {
         const invoice = await tx.salesInvoice.create({
           data: {
             ...data,
+            zatcaUuid: zatca.zatcaUuid,
+            zatcaHash: zatca.zatcaHash,
+            zatcaQrCode: zatca.zatcaQrCode,
+            zatcaStatus: zatca.zatcaStatus,
             ...(processedItems.length > 0 ? { items: { create: processedItems } } : {}),
           },
           include: { client: true, items: true },
@@ -418,8 +443,8 @@ export const salesInvoiceController = {
             },
           });
 
-          // Find Sales Revenue account (CR side)
-          const revenueAccount = await tx.account.findFirst({
+          // Find fallback Sales Revenue account (CR side)
+          const fallbackRevenueAccount = await tx.account.findFirst({
             where: {
               OR: [
                 { subType: 'Sales Revenue' },
@@ -447,7 +472,65 @@ export const salesInvoiceController = {
             });
           }
 
-          if (arAccount && revenueAccount) {
+          // Build per-service revenue lines using each service's ledgerAccountId
+          // Look up each invoice item's service to find its specific ledger account
+          const invoiceItems = invoice.items || processedItems || [];
+          const revenueByAccount: Record<string, { accountId: string; amount: number; description: string }> = {};
+
+          for (const item of invoiceItems) {
+            const itemAmount = Number(item.amount) || 0;
+            if (itemAmount <= 0) continue;
+
+            let targetAccountId: string | null = null;
+
+            // Check if this item has a serviceId with a ledgerAccountId
+            if (item.serviceId) {
+              const svc = await tx.invoiceService.findUnique({
+                where: { id: item.serviceId },
+                select: { ledgerAccountId: true, nameEn: true },
+              });
+              if (svc?.ledgerAccountId) {
+                // Verify the account exists and is active
+                const ledgerAcct = await tx.account.findFirst({
+                  where: { id: svc.ledgerAccountId, isActive: true },
+                });
+                if (ledgerAcct) {
+                  targetAccountId = ledgerAcct.id;
+                }
+              }
+            }
+
+            // Fallback to generic revenue account
+            if (!targetAccountId && fallbackRevenueAccount) {
+              targetAccountId = fallbackRevenueAccount.id;
+            }
+
+            if (targetAccountId) {
+              if (revenueByAccount[targetAccountId]) {
+                revenueByAccount[targetAccountId].amount += itemAmount;
+              } else {
+                revenueByAccount[targetAccountId] = {
+                  accountId: targetAccountId,
+                  amount: itemAmount,
+                  description: `Sales Revenue - ${item.nameEn || 'Service'} - ${invoice.invoiceNumber}`,
+                };
+              }
+            }
+          }
+
+          // If no items matched (e.g. no items array), fall back to single revenue line
+          const hasPerServiceLines = Object.keys(revenueByAccount).length > 0;
+          if (!hasPerServiceLines && fallbackRevenueAccount) {
+            revenueByAccount[fallbackRevenueAccount.id] = {
+              accountId: fallbackRevenueAccount.id,
+              amount: vatAccount ? subtotalAmt : totalAmt,
+              description: `Sales Revenue - ${invoice.invoiceNumber}`,
+            };
+          }
+
+          const hasAnyRevenue = Object.keys(revenueByAccount).length > 0;
+
+          if (arAccount && hasAnyRevenue) {
             // Generate journal entry number
             const jYear = new Date().getFullYear();
             const jPrefix = `JE-INV-${jYear}-`;
@@ -474,30 +557,26 @@ export const salesInvoiceController = {
               },
             ];
 
-            if (vatAccount && vatAmt > 0) {
-              // Separate revenue and VAT lines
+            // Add per-service revenue lines (CR side)
+            let lineNum = 2;
+            for (const entry of Object.values(revenueByAccount)) {
               journalLines.push({
-                lineNumber: 2,
-                accountId: revenueAccount.id,
-                description: `Sales Revenue - ${invoice.invoiceNumber}`,
+                lineNumber: lineNum++,
+                accountId: entry.accountId,
+                description: entry.description,
                 debitAmount: 0,
-                creditAmount: subtotalAmt,
+                creditAmount: entry.amount,
               });
+            }
+
+            // Add VAT line if applicable
+            if (vatAccount && vatAmt > 0) {
               journalLines.push({
-                lineNumber: 3,
+                lineNumber: lineNum++,
                 accountId: vatAccount.id,
                 description: `VAT Output 15% - ${invoice.invoiceNumber}`,
                 debitAmount: 0,
                 creditAmount: vatAmt,
-              });
-            } else {
-              // Single revenue line (full amount)
-              journalLines.push({
-                lineNumber: 2,
-                accountId: revenueAccount.id,
-                description: `Sales Revenue - ${invoice.invoiceNumber}`,
-                debitAmount: 0,
-                creditAmount: totalAmt,
               });
             }
 
@@ -524,11 +603,13 @@ export const salesInvoiceController = {
               where: { id: arAccount.id },
               data: { currentBalance: { increment: totalAmt } },
             });
-            // Revenue is REVENUE (normal credit): +subtotalAmt
-            await tx.account.update({
-              where: { id: revenueAccount.id },
-              data: { currentBalance: { increment: vatAccount ? subtotalAmt : totalAmt } },
-            });
+            // Revenue accounts: update each per-service account balance
+            for (const entry of Object.values(revenueByAccount)) {
+              await tx.account.update({
+                where: { id: entry.accountId },
+                data: { currentBalance: { increment: entry.amount } },
+              });
+            }
             // VAT Output is LIABILITY (normal credit): +vatAmt
             if (vatAccount && vatAmt > 0) {
               await tx.account.update({
@@ -670,22 +751,55 @@ export const salesInvoiceController = {
 
           if (userId && newTotalAmt > 0) {
             const arAccount = await tx.account.findFirst({ where: { OR: [{ subType: 'Accounts Receivable' }, { name: { contains: 'Accounts Receivable' } }, { name: { contains: 'Receivable' } }], isActive: true } });
-            const revenueAccount = await tx.account.findFirst({ where: { OR: [{ subType: 'Sales Revenue' }, { type: 'REVENUE' }, { name: { contains: 'Sales' } }, { name: { contains: 'Revenue' } }], isActive: true } });
+            const fallbackRevenueAccount = await tx.account.findFirst({ where: { OR: [{ subType: 'Sales Revenue' }, { type: 'REVENUE' }, { name: { contains: 'Sales' } }, { name: { contains: 'Revenue' } }], isActive: true } });
             let vatAccount: any = null;
             if (vatAmt > 0) {
               vatAccount = await tx.account.findFirst({ where: { OR: [{ name: { contains: 'VAT Output' } }, { name: { contains: 'VAT Payable' } }, { subType: 'VAT' }], isActive: true } });
             }
 
-            if (arAccount && revenueAccount) {
+            // Build per-service revenue lines using each service's ledgerAccountId
+            const updatedItems = await tx.salesInvoiceItem.findMany({ where: { salesInvoiceId: id }, include: { service: true } });
+            const revenueByAccount: Record<string, { accountId: string; amount: number; description: string }> = {};
+
+            for (const item of updatedItems) {
+              const itemAmount = Number(item.amount) || 0;
+              if (itemAmount <= 0) continue;
+
+              let targetAccountId: string | null = null;
+              if (item.serviceId) {
+                const svc = await tx.invoiceService.findUnique({ where: { id: item.serviceId }, select: { ledgerAccountId: true, nameEn: true } });
+                if (svc?.ledgerAccountId) {
+                  const ledgerAcct = await tx.account.findFirst({ where: { id: svc.ledgerAccountId, isActive: true } });
+                  if (ledgerAcct) targetAccountId = ledgerAcct.id;
+                }
+              }
+              if (!targetAccountId && fallbackRevenueAccount) targetAccountId = fallbackRevenueAccount.id;
+
+              if (targetAccountId) {
+                if (revenueByAccount[targetAccountId]) {
+                  revenueByAccount[targetAccountId].amount += itemAmount;
+                } else {
+                  revenueByAccount[targetAccountId] = { accountId: targetAccountId, amount: itemAmount, description: `Sales Revenue - ${item.nameEn || 'Service'} - ${invoice.invoiceNumber}` };
+                }
+              }
+            }
+
+            // Fallback if no items matched
+            if (Object.keys(revenueByAccount).length === 0 && fallbackRevenueAccount) {
+              revenueByAccount[fallbackRevenueAccount.id] = { accountId: fallbackRevenueAccount.id, amount: vatAccount ? subtotalAmt : newTotalAmt, description: `Sales Revenue - ${invoice.invoiceNumber}` };
+            }
+
+            if (arAccount && Object.keys(revenueByAccount).length > 0) {
               const entryNumber = preGenJeNumber;
               const journalLines: any[] = [
                 { lineNumber: 1, accountId: arAccount.id, description: `Accounts Receivable - ${invoice.client?.name || ''} - ${invoice.invoiceNumber}`, debitAmount: newTotalAmt, creditAmount: 0, customerId: clientId || undefined },
               ];
+              let lineNum = 2;
+              for (const entry of Object.values(revenueByAccount)) {
+                journalLines.push({ lineNumber: lineNum++, accountId: entry.accountId, description: entry.description, debitAmount: 0, creditAmount: entry.amount });
+              }
               if (vatAccount && vatAmt > 0) {
-                journalLines.push({ lineNumber: 2, accountId: revenueAccount.id, description: `Sales Revenue - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: subtotalAmt });
-                journalLines.push({ lineNumber: 3, accountId: vatAccount.id, description: `VAT Output 15% - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: vatAmt });
-              } else {
-                journalLines.push({ lineNumber: 2, accountId: revenueAccount.id, description: `Sales Revenue - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: newTotalAmt });
+                journalLines.push({ lineNumber: lineNum++, accountId: vatAccount.id, description: `VAT Output 15% - ${invoice.invoiceNumber}`, debitAmount: 0, creditAmount: vatAmt });
               }
 
               await tx.journalEntry.create({
@@ -700,9 +814,11 @@ export const salesInvoiceController = {
                 },
               });
 
-              // Update new account balances
+              // Update account balances
               await tx.account.update({ where: { id: arAccount.id }, data: { currentBalance: { increment: newTotalAmt } } });
-              await tx.account.update({ where: { id: revenueAccount.id }, data: { currentBalance: { increment: vatAccount ? subtotalAmt : newTotalAmt } } });
+              for (const entry of Object.values(revenueByAccount)) {
+                await tx.account.update({ where: { id: entry.accountId }, data: { currentBalance: { increment: entry.amount } } });
+              }
               if (vatAccount && vatAmt > 0) {
                 await tx.account.update({ where: { id: vatAccount.id }, data: { currentBalance: { increment: vatAmt } } });
               }
@@ -748,6 +864,55 @@ export const salesInvoiceController = {
       }, { maxWait: 10000, timeout: 30000 });
 
       res.json({ success: true, data: result });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+  async reportToZatca(req: Request, res: Response) {
+    try {
+      const invoice = await prisma.salesInvoice.findUnique({
+        where: { id: req.params.id },
+        include: { client: true, items: true },
+      });
+      if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
+
+      if (!invoice.zatcaUuid || !invoice.zatcaHash) {
+        return res.status(400).json({ success: false, error: 'Invoice is missing ZATCA fields (UUID/hash). Please recreate the invoice.' });
+      }
+      if (invoice.zatcaStatus === 'Synced With Zatca') {
+        return res.status(400).json({ success: false, error: 'Invoice is already synced with ZATCA.' });
+      }
+
+      await prisma.salesInvoice.update({
+        where: { id: req.params.id },
+        data: { zatcaStatus: 'Pending Synchronization' },
+      });
+
+      const result = await simulateZatcaReport({
+        invoiceNumber: invoice.invoiceNumber,
+        zatcaUuid: invoice.zatcaUuid,
+        zatcaHash: invoice.zatcaHash,
+      });
+
+      if (result.success) {
+        const updated = await prisma.salesInvoice.update({
+          where: { id: req.params.id },
+          data: {
+            zatcaStatus: 'Synced With Zatca',
+            zatcaClearanceId: result.clearanceId,
+            zatcaClearedAt: result.clearedAt,
+          },
+          include: { client: true, items: true },
+        });
+        res.json({ success: true, data: updated });
+      } else {
+        const updated = await prisma.salesInvoice.update({
+          where: { id: req.params.id },
+          data: { zatcaStatus: 'Rejected' },
+          include: { client: true, items: true },
+        });
+        res.json({ success: false, error: result.error, data: updated });
+      }
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -1298,21 +1463,39 @@ export const expenseEntryController = {
           let creditAccountId: string | null = null;
 
           if ((data.paymentMethod === 'Bank' || data.paymentMethod === 'Cheque') && data.bankAccountId) {
-            // Find the Account linked to this BankAccount
-            const linkedAccount = await tx.account.findFirst({
+            // Find the Account linked to this BankAccount via bankId
+            let linkedAccount = await tx.account.findFirst({
               where: { bankId: data.bankAccountId },
             });
+
+            // Fallback: match by bank name/code if bankId link is missing
+            if (!linkedAccount) {
+              const bankRecord = await tx.bankAccount.findUnique({ where: { id: data.bankAccountId } });
+              if (bankRecord) {
+                linkedAccount = await tx.account.findFirst({
+                  where: {
+                    isBankAccount: true,
+                    isActive: true,
+                    OR: [
+                      { name: { contains: bankRecord.bankName.split(' ')[0] } },
+                      { name: { contains: bankRecord.code } },
+                    ],
+                  },
+                });
+              }
+            }
+
             creditAccountId = linkedAccount?.id || null;
           }
 
           if (!creditAccountId) {
-            // Find a Cash-type account
+            // Only fall back to Cash if payment method is actually Cash
             const cashAccount = await tx.account.findFirst({
               where: {
                 OR: [
-                  { code: { contains: 'CASH' } },
-                  { name: { contains: 'Cash' } },
-                  { subType: 'Cash' },
+                  { code: '1010' },
+                  { name: { contains: 'Cash on Hand' } },
+                  { subType: 'CURRENT_ASSET', name: { contains: 'Cash' } },
                 ],
                 isActive: true,
               },
@@ -1321,7 +1504,9 @@ export const expenseEntryController = {
           }
 
           if (creditAccountId) {
-            const totalAmt = data.totalAmount || (data.amount || 0) + (data.vatAmount || 0);
+            const netAmt = Number(data.amount) || 0;
+            const vatAmt = Number(data.vatAmount) || 0;
+            const totalAmt = data.totalAmount || (netAmt + vatAmt);
 
             // Generate journal entry number
             const jYear = new Date().getFullYear();
@@ -1337,6 +1522,56 @@ export const expenseEntryController = {
             }
             const entryNumber = `${jPrefix}${String(jSeq).padStart(4, '0')}`;
 
+            // Build journal lines: DR Expense (net), DR VAT Input (vat), CR Cash/Bank (total)
+            const journalLines: any[] = [
+              {
+                lineNumber: 1,
+                accountId: data.accountId,
+                description: `Expense - ${data.category || data.description || ''}`,
+                debitAmount: netAmt,
+                creditAmount: 0,
+                vendorId: data.vendorId || undefined,
+              },
+            ];
+
+            let lineNum = 2;
+
+            // If VAT exists, find VAT Input account and add separate VAT line
+            if (vatAmt > 0) {
+              const vatInputAccount = await tx.account.findFirst({
+                where: {
+                  OR: [
+                    { name: { contains: 'VAT Input' } },
+                    { name: { contains: 'Input Tax' } },
+                    { name: { contains: 'VAT Receivable' } },
+                    { subType: 'VAT' },
+                  ],
+                  isActive: true,
+                },
+              });
+              if (vatInputAccount) {
+                journalLines.push({
+                  lineNumber: lineNum++,
+                  accountId: vatInputAccount.id,
+                  description: `VAT Input - ${expense.expenseNumber}`,
+                  debitAmount: vatAmt,
+                  creditAmount: 0,
+                });
+              } else {
+                // No VAT Input account found, add VAT to expense account
+                journalLines[0].debitAmount = totalAmt;
+              }
+            }
+
+            // CR Cash/Bank (total amount)
+            journalLines.push({
+              lineNumber: lineNum++,
+              accountId: creditAccountId,
+              description: `Payment - ${data.paymentMethod || 'Cash'}`,
+              debitAmount: 0,
+              creditAmount: totalAmt,
+            });
+
             await tx.journalEntry.create({
               data: {
                 entryNumber,
@@ -1350,34 +1585,27 @@ export const expenseEntryController = {
                 createdById: userId,
                 postedAt: new Date(),
                 notes: JSON.stringify({ expenseEntryId: expense.id, vendorId: data.vendorId, paymentMethod: data.paymentMethod }),
-                lines: {
-                  create: [
-                    {
-                      lineNumber: 1,
-                      accountId: data.accountId,
-                      description: `Expense - ${data.category || data.description || ''}`,
-                      debitAmount: totalAmt,
-                      creditAmount: 0,
-                      vendorId: data.vendorId || undefined,
-                    },
-                    {
-                      lineNumber: 2,
-                      accountId: creditAccountId,
-                      description: `Payment - ${data.paymentMethod || 'Cash'}`,
-                      debitAmount: 0,
-                      creditAmount: totalAmt,
-                    },
-                  ],
-                },
+                lines: { create: journalLines },
               },
             });
 
             // Update account balances
-            // Expense account (EXPENSE, normal debit): +totalAmt
+            // Expense account (EXPENSE, normal debit): +netAmt (or +totalAmt if no VAT account)
+            const expenseDebitAmt = journalLines[0].debitAmount;
             await tx.account.update({
               where: { id: data.accountId },
-              data: { currentBalance: { increment: totalAmt } },
+              data: { currentBalance: { increment: expenseDebitAmt } },
             });
+            // VAT Input account if present
+            if (vatAmt > 0) {
+              const vatLine = journalLines.find((l: any) => l.description?.includes('VAT Input'));
+              if (vatLine) {
+                await tx.account.update({
+                  where: { id: vatLine.accountId },
+                  data: { currentBalance: { increment: vatAmt } },
+                });
+              }
+            }
             // Cash/Bank account (ASSET, normal debit): -totalAmt (credit reduces asset)
             await tx.account.update({
               where: { id: creditAccountId },
@@ -1709,7 +1937,7 @@ export const salesQuoteController = {
               isActive: true,
             },
           });
-          const revenueAccount = await tx.account.findFirst({
+          const fallbackRevenueAccount = await tx.account.findFirst({
             where: {
               OR: [
                 { subType: 'Sales Revenue' },
@@ -1735,7 +1963,39 @@ export const salesQuoteController = {
             });
           }
 
-          if (arAccount && revenueAccount) {
+          // Build per-service revenue lines using each service's ledgerAccountId
+          const invoiceItems = inv.items || [];
+          const revenueByAccount: Record<string, { accountId: string; amount: number; description: string }> = {};
+
+          for (const item of invoiceItems) {
+            const itemAmount = Number(item.amount) || 0;
+            if (itemAmount <= 0) continue;
+
+            let targetAccountId: string | null = null;
+            if (item.serviceId) {
+              const svc = await tx.invoiceService.findUnique({ where: { id: item.serviceId }, select: { ledgerAccountId: true, nameEn: true } });
+              if (svc?.ledgerAccountId) {
+                const ledgerAcct = await tx.account.findFirst({ where: { id: svc.ledgerAccountId, isActive: true } });
+                if (ledgerAcct) targetAccountId = ledgerAcct.id;
+              }
+            }
+            if (!targetAccountId && fallbackRevenueAccount) targetAccountId = fallbackRevenueAccount.id;
+
+            if (targetAccountId) {
+              if (revenueByAccount[targetAccountId]) {
+                revenueByAccount[targetAccountId].amount += itemAmount;
+              } else {
+                revenueByAccount[targetAccountId] = { accountId: targetAccountId, amount: itemAmount, description: `Sales Revenue - ${item.nameEn || 'Service'} - ${inv.invoiceNumber}` };
+              }
+            }
+          }
+
+          // Fallback if no items matched
+          if (Object.keys(revenueByAccount).length === 0 && fallbackRevenueAccount) {
+            revenueByAccount[fallbackRevenueAccount.id] = { accountId: fallbackRevenueAccount.id, amount: vatAccount ? subtotalAmt : totalAmt, description: `Sales Revenue - ${inv.invoiceNumber}` };
+          }
+
+          if (arAccount && Object.keys(revenueByAccount).length > 0) {
             const jYear = new Date().getFullYear();
             const jPrefix = `JE-INV-${jYear}-`;
             const lastJE = await tx.journalEntry.findFirst({
@@ -1760,29 +2020,12 @@ export const salesQuoteController = {
               },
             ];
 
+            let lineNum = 2;
+            for (const entry of Object.values(revenueByAccount)) {
+              journalLines.push({ lineNumber: lineNum++, accountId: entry.accountId, description: entry.description, debitAmount: 0, creditAmount: entry.amount });
+            }
             if (vatAccount && vatAmt > 0) {
-              journalLines.push({
-                lineNumber: 2,
-                accountId: revenueAccount.id,
-                description: `Sales Revenue - ${inv.invoiceNumber}`,
-                debitAmount: 0,
-                creditAmount: subtotalAmt,
-              });
-              journalLines.push({
-                lineNumber: 3,
-                accountId: vatAccount.id,
-                description: `VAT Output 15% - ${inv.invoiceNumber}`,
-                debitAmount: 0,
-                creditAmount: vatAmt,
-              });
-            } else {
-              journalLines.push({
-                lineNumber: 2,
-                accountId: revenueAccount.id,
-                description: `Sales Revenue - ${inv.invoiceNumber}`,
-                debitAmount: 0,
-                creditAmount: totalAmt,
-              });
+              journalLines.push({ lineNumber: lineNum++, accountId: vatAccount.id, description: `VAT Output 15% - ${inv.invoiceNumber}`, debitAmount: 0, creditAmount: vatAmt });
             }
 
             await tx.journalEntry.create({
@@ -1804,7 +2047,9 @@ export const salesQuoteController = {
 
             // Update account balances
             await tx.account.update({ where: { id: arAccount.id }, data: { currentBalance: { increment: totalAmt } } });
-            await tx.account.update({ where: { id: revenueAccount.id }, data: { currentBalance: { increment: vatAccount ? subtotalAmt : totalAmt } } });
+            for (const entry of Object.values(revenueByAccount)) {
+              await tx.account.update({ where: { id: entry.accountId }, data: { currentBalance: { increment: entry.amount } } });
+            }
             if (vatAccount && vatAmt > 0) {
               await tx.account.update({ where: { id: vatAccount.id }, data: { currentBalance: { increment: vatAmt } } });
             }

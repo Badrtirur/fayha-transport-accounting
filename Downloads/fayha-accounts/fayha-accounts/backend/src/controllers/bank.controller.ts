@@ -602,15 +602,28 @@ export const dashboardController = {
       const liabilities = accounts.filter(a => a.type === 'LIABILITY');
       const equity = accounts.filter(a => a.type === 'EQUITY');
 
+      // Include Net Income (Revenue - Expenses) in equity for complete balance sheet
+      const plAccounts = await prisma.account.findMany({
+        where: { isActive: true, type: { in: ['REVENUE', 'EXPENSE'] } },
+      });
+      const totalRev = plAccounts.filter(a => a.type === 'REVENUE').reduce((s, a) => s + Number(a.currentBalance), 0);
+      const totalExp = plAccounts.filter(a => a.type === 'EXPENSE').reduce((s, a) => s + Number(a.currentBalance), 0);
+      const netIncome = totalRev - totalExp;
+
+      const totalAssets = assets.reduce((s, a) => s + Number(a.currentBalance), 0);
+      const totalLiabilities = liabilities.reduce((s, a) => s + Number(a.currentBalance), 0);
+      const totalEquity = equity.reduce((s, a) => s + Number(a.currentBalance), 0) + netIncome;
+
       res.json({
         success: true,
         data: {
-          assets: assets.map(a => ({ accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
-          liabilities: liabilities.map(a => ({ accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
-          equity: equity.map(a => ({ accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
-          totalAssets: assets.reduce((s, a) => s + Number(a.currentBalance), 0),
-          totalLiabilities: liabilities.reduce((s, a) => s + Number(a.currentBalance), 0),
-          totalEquity: equity.reduce((s, a) => s + Number(a.currentBalance), 0),
+          assets: assets.map(a => ({ accountId: a.id, accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
+          liabilities: liabilities.map(a => ({ accountId: a.id, accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
+          equity: equity.map(a => ({ accountId: a.id, accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
+          totalAssets,
+          totalLiabilities,
+          totalEquity,
+          netIncome,
         }
       });
     } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
@@ -631,8 +644,8 @@ export const dashboardController = {
       res.json({
         success: true,
         data: {
-          revenue: revenue.map(a => ({ accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
-          expenses: expenses.map(a => ({ accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
+          revenue: revenue.map(a => ({ accountId: a.id, accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
+          expenses: expenses.map(a => ({ accountId: a.id, accountCode: a.code, accountName: a.name, subType: a.subType, balance: Number(a.currentBalance) })),
           totalRevenue: totalRev,
           totalExpenses: totalExp,
           netIncome: totalRev - totalExp,

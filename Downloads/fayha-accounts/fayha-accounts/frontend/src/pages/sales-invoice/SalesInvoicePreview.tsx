@@ -5,35 +5,7 @@ import type { SalesInvoice, Client, JobReference } from '../../types';
 import { salesInvoicesApi, customersApi, jobReferencesApi, banksApi, settingsApi } from '../../services/api';
 import QRCode from 'qrcode';
 import toast from 'react-hot-toast';
-
-// ─── ZATCA TLV QR Code Builder ───────────────────────────────
-function buildZatcaTlv(sellerName: string, vatNumber: string, timestamp: string, totalWithVat: number, vatAmount: number): string {
-  const encoder = new TextEncoder();
-  const tlvParts: Uint8Array[] = [];
-  const entries = [
-    { tag: 1, value: sellerName },
-    { tag: 2, value: vatNumber },
-    { tag: 3, value: timestamp },
-    { tag: 4, value: totalWithVat.toFixed(2) },
-    { tag: 5, value: vatAmount.toFixed(2) },
-  ];
-  for (const entry of entries) {
-    const valueBytes = encoder.encode(entry.value);
-    const tlv = new Uint8Array(2 + valueBytes.length);
-    tlv[0] = entry.tag;
-    tlv[1] = valueBytes.length;
-    tlv.set(valueBytes, 2);
-    tlvParts.push(tlv);
-  }
-  const totalLen = tlvParts.reduce((s, p) => s + p.length, 0);
-  const result = new Uint8Array(totalLen);
-  let offset = 0;
-  for (const part of tlvParts) {
-    result.set(part, offset);
-    offset += part.length;
-  }
-  return btoa(String.fromCharCode(...result));
-}
+import { buildZatcaTlv } from '../../utils/zatca';
 
 // ─── Fayha Arabia Logistics Logo (real image) ───────────────────────────────
 const LOGO_URL = '/fayha-logo.png';
@@ -495,7 +467,18 @@ const SalesInvoicePreview: React.FC = () => {
                   <p className="text-[9px] text-slate-500">
                     Status: <span className={invoice.zatcaStatus === 'Synced With Zatca' ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}>{invoice.zatcaStatus}</span>
                   </p>
-                  {invoice.zatca?.uuid && <p className="text-[7px] font-mono text-slate-400">UUID: {invoice.zatca.uuid}</p>}
+                  {((invoice as any).zatcaUuid || invoice.zatca?.uuid) && (
+                    <p className="text-[7px] font-mono text-slate-400">UUID: {(invoice as any).zatcaUuid || invoice.zatca?.uuid}</p>
+                  )}
+                  {(invoice as any).zatcaHash && (
+                    <p className="text-[7px] font-mono text-slate-400">HASH: {(invoice as any).zatcaHash}</p>
+                  )}
+                  {(invoice as any).zatcaClearanceId && (
+                    <p className="text-[7px] font-mono text-emerald-500">CLEARANCE: {(invoice as any).zatcaClearanceId}</p>
+                  )}
+                  {invoice.zatcaStatus === 'Rejected' && (
+                    <p className="text-[7px] font-bold text-red-600">REJECTED BY ZATCA</p>
+                  )}
                 </div>
               </div>
 

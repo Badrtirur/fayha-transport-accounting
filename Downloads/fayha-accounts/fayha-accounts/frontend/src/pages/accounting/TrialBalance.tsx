@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { accountingApi } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -14,6 +15,7 @@ interface TrialBalanceRow {
 }
 
 const TrialBalance: React.FC = () => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<TrialBalanceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [asOfDate] = useState(new Date().toISOString().split('T')[0]);
@@ -144,9 +146,13 @@ const TrialBalance: React.FC = () => {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.accountId || row.accountCode} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0">
+                <tr
+                  key={row.accountId || row.accountCode}
+                  onClick={() => row.accountId && navigate(`/accounting/account/${row.accountId}`)}
+                  className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0 cursor-pointer"
+                >
                   <td className="py-3 px-4 text-slate-500 font-mono text-sm font-semibold">{row.accountCode}</td>
-                  <td className="py-3 px-4 text-sm font-medium text-slate-800">{row.accountName}</td>
+                  <td className="py-3 px-4 text-sm font-medium text-blue-700 hover:text-blue-900 underline decoration-blue-200 hover:decoration-blue-500">{row.accountName}</td>
                   <td className="py-3 px-4">
                     <span className={`inline-flex px-2 py-1 rounded-lg text-xs font-semibold ${typeColor[row.accountType] || 'text-slate-600 bg-slate-50'}`}>
                       {row.accountType}

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { accountsApi, accountingApi } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -16,6 +17,7 @@ interface LedgerEntry {
 }
 
 const GeneralLedger: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [selectedAccount, setSelectedAccount] = useState<any>(null);
@@ -29,7 +31,14 @@ const GeneralLedger: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    accountsApi.getAll().then(setAccounts).catch((err: any) => {
+    accountsApi.getAll().then((accs: any[]) => {
+      setAccounts(accs);
+      // Auto-select account from URL param ?accountId=xxx
+      const paramAccountId = searchParams.get('accountId');
+      if (paramAccountId && !selectedAccountId) {
+        setSelectedAccountId(paramAccountId);
+      }
+    }).catch((err: any) => {
       toast.error(err?.message || 'Failed to load accounts');
     });
   }, []);

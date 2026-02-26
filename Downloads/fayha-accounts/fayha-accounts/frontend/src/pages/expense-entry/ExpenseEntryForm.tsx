@@ -62,9 +62,10 @@ const ExpenseEntryForm: React.FC = () => {
       setVendorOptions(clientList.map((c: any) => ({ value: c.id, label: c.name })));
       setAllJobRefs(jrList);
       setJobRefOptions(jrList.map((j: any) => ({ value: j.id, label: j.jobRefNo || j.jobNumber || j.id })));
+      // Show ALL accounts so balance sheet reflects exactly where money went
       setAccountOptions(accounts.map((a: any) => ({
         value: a.id,
-        label: `[${a.code}] ${a.name}`,
+        label: `[${a.code}] ${a.name} (${a.type || ''})`,
       })));
       setBankOptions(banks.map((b: any) => ({
         value: b.id,
@@ -141,7 +142,7 @@ const ExpenseEntryForm: React.FC = () => {
       return;
     }
     if (!accountId) {
-      toast.error('Please select an expense account.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
+      toast.error('Please select a ledger account.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
       return;
     }
     if (!amount || amount <= 0) {
@@ -254,12 +255,12 @@ const ExpenseEntryForm: React.FC = () => {
             placeholder="Search vendor..."
           />
           <SearchableSelect
-            label="Expense Account"
+            label="Select Ledger For Accounting"
             required
             options={accountOptions}
             value={accountId}
             onChange={setAccountId}
-            placeholder="Select account..."
+            placeholder="Search ledger account..."
           />
         </div>
 
@@ -341,8 +342,8 @@ const ExpenseEntryForm: React.FC = () => {
           </div>
         </div>
 
-        {/* Row 4: Payment Method, Bank Account, Receipt No (3 col) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Row 4: Payment Method, Bank Account, Category, Receipt No */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">
               Payment Method<span className="text-rose-500 ml-0.5">*</span>
@@ -357,7 +358,7 @@ const ExpenseEntryForm: React.FC = () => {
               <option value="Cheque">Cheque</option>
             </select>
           </div>
-          {paymentMethod === 'Bank' || paymentMethod === 'Cheque' ? (
+          {(paymentMethod === 'Bank' || paymentMethod === 'Cheque') && (
             <SearchableSelect
               label="Bank Account"
               required
@@ -366,18 +367,33 @@ const ExpenseEntryForm: React.FC = () => {
               onChange={setBankAccountId}
               placeholder="Select bank account..."
             />
-          ) : (
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1.5">Category</label>
-              <input
-                type="text"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="e.g. Customs, Transport"
-                className="input-premium w-full"
-              />
-            </div>
           )}
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">Expense Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="input-premium w-full"
+            >
+              <option value="">Select category...</option>
+              <option value="Customs Charges">Customs Charges</option>
+              <option value="Transport">Transport</option>
+              <option value="Port Charges">Port Charges</option>
+              <option value="Delivery Order">Delivery Order</option>
+              <option value="Storage">Storage</option>
+              <option value="Container Detention">Container Detention</option>
+              <option value="Inspection">Inspection</option>
+              <option value="Demurrage">Demurrage</option>
+              <option value="Fuel">Fuel</option>
+              <option value="Office Supplies">Office Supplies</option>
+              <option value="Rent">Rent</option>
+              <option value="Utilities">Utilities</option>
+              <option value="Insurance">Insurance</option>
+              <option value="Salary">Salary</option>
+              <option value="Maintenance">Maintenance</option>
+              <option value="Miscellaneous">Miscellaneous</option>
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-semibold text-slate-500 mb-1.5">Receipt No</label>
             <input

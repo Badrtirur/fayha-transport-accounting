@@ -3,6 +3,7 @@ import { Response } from 'express';
 import prisma from '../config/database';
 import { AuthRequest } from '../types';
 import { generateNumber } from '../utils/helpers';
+import { generateZatcaFields } from '../utils/zatca';
 import { config } from '../config';
 
 export const invoiceController = {
@@ -97,6 +98,26 @@ export const invoiceController = {
       const invoiceNumber = await generateNumber('INVOICE', 'INV');
       const userId = req.user?.id;
 
+      // Generate ZATCA Phase 1 fields
+      const companySettings = await prisma.setting.findMany({
+        where: { key: { in: ['COMPANY_NAME', 'COMPANY_VAT_NUMBER'] } },
+      });
+      const settingsMap: Record<string, string> = {};
+      for (const s of companySettings) settingsMap[s.key] = s.value;
+
+      const zatca = generateZatcaFields(
+        {
+          invoiceNumber,
+          issueDate: new Date(issueDate),
+          totalAmount,
+          vatAmount,
+        },
+        {
+          sellerName: settingsMap['COMPANY_NAME'] || 'Fayha Arabia Logistics',
+          vatNumber: settingsMap['COMPANY_VAT_NUMBER'] || '311467026900003',
+        },
+      );
+
       const invoice = await prisma.$transaction(async (tx) => {
         // Create the invoice
         const inv = await tx.invoice.create({
@@ -114,6 +135,10 @@ export const invoiceController = {
             paymentTermDays: paymentTermDays || 30,
             status: 'DRAFT',
             notes,
+            zatcaUuid: zatca.zatcaUuid,
+            zatcaHash: zatca.zatcaHash,
+            zatcaQrCode: zatca.zatcaQrCode,
+            zatcaStatus: zatca.zatcaStatus,
             lineItems: { create: processedLines }
           },
           include: { customer: true, lineItems: true }

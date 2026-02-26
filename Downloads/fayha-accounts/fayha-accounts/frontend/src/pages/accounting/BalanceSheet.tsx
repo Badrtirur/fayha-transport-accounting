@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { dashboardApi } from '../../services/api';
 import toast from 'react-hot-toast';
 import { Wallet, TrendingDown, Landmark, Scale, Printer, RefreshCw } from 'lucide-react';
 
 interface BSAccount {
+  accountId?: string;
   accountCode: string;
   accountName: string;
   subType: string;
@@ -20,7 +22,7 @@ interface BalanceSheetData {
   totalEquity: number;
 }
 
-const SectionTable: React.FC<{ title: string; icon: any; items: BSAccount[]; total: number; color: string; gradient: string }> = ({ title, icon: Icon, items, total, color, gradient }) => (
+const SectionTable: React.FC<{ title: string; icon: any; items: BSAccount[]; total: number; color: string; gradient: string; onAccountClick?: (accountId: string) => void }> = ({ title, icon: Icon, items, total, color, gradient, onAccountClick }) => (
   <div className="bg-white rounded-2xl shadow-card border border-slate-100/80 overflow-hidden">
     <div className={`p-5 border-b border-slate-100 bg-gradient-to-r ${gradient}`}>
       <div className="flex items-center gap-3">
@@ -46,9 +48,13 @@ const SectionTable: React.FC<{ title: string; icon: any; items: BSAccount[]; tot
         {items.length === 0 ? (
           <tr><td colSpan={4} className="py-8 text-center text-sm text-slate-400">No accounts found</td></tr>
         ) : items.map((item) => (
-          <tr key={item.accountCode} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0">
+          <tr
+            key={item.accountCode}
+            onClick={() => item.accountId && onAccountClick?.(item.accountId)}
+            className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0 cursor-pointer"
+          >
             <td className="py-3 px-4 text-slate-500 font-mono text-sm font-semibold">{item.accountCode}</td>
-            <td className="py-3 px-4 text-sm font-medium text-slate-800">{item.accountName}</td>
+            <td className="py-3 px-4 text-sm font-medium text-blue-700 hover:text-blue-900 underline decoration-blue-200 hover:decoration-blue-500">{item.accountName}</td>
             <td className="py-3 px-4">
               <span className="text-xs text-slate-500 bg-slate-50 px-2 py-1 rounded-lg">{item.subType || '-'}</span>
             </td>
@@ -71,6 +77,7 @@ const SectionTable: React.FC<{ title: string; icon: any; items: BSAccount[]; tot
 );
 
 const BalanceSheet: React.FC = () => {
+  const navigate = useNavigate();
   const [data, setData] = useState<BalanceSheetData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -166,9 +173,9 @@ const BalanceSheet: React.FC = () => {
         </div>
       ) : data ? (
         <div className="space-y-6">
-          <SectionTable title="Assets" icon={Wallet} items={data.assets} total={data.totalAssets} color="text-blue-700" gradient="from-blue-600 to-blue-500" />
-          <SectionTable title="Liabilities" icon={TrendingDown} items={data.liabilities} total={data.totalLiabilities} color="text-rose-700" gradient="from-rose-600 to-rose-500" />
-          <SectionTable title="Equity" icon={Landmark} items={data.equity} total={data.totalEquity} color="text-purple-700" gradient="from-purple-600 to-purple-500" />
+          <SectionTable title="Assets" icon={Wallet} items={data.assets} total={data.totalAssets} color="text-blue-700" gradient="from-blue-600 to-blue-500" onAccountClick={(id) => navigate(`/accounting/account/${id}`)} />
+          <SectionTable title="Liabilities" icon={TrendingDown} items={data.liabilities} total={data.totalLiabilities} color="text-rose-700" gradient="from-rose-600 to-rose-500" onAccountClick={(id) => navigate(`/accounting/account/${id}`)} />
+          <SectionTable title="Equity" icon={Landmark} items={data.equity} total={data.totalEquity} color="text-purple-700" gradient="from-purple-600 to-purple-500" onAccountClick={(id) => navigate(`/accounting/account/${id}`)} />
 
           {/* Accounting Equation */}
           <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-6 text-white">

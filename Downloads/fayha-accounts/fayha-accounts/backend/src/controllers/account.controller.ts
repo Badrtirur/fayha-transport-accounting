@@ -79,7 +79,7 @@ export const accountController = {
           action: 'CREATE',
           entityType: 'Account',
           entityId: account.id,
-          newData: account as any,
+          newData: JSON.stringify(account),
         }
       });
 
@@ -232,6 +232,7 @@ export const accountController = {
         totalCredits += credit;
 
         return {
+          accountId: acc.id,
           accountCode: acc.code,
           accountName: acc.name,
           accountType: acc.type,

@@ -21,7 +21,7 @@ app.use(helmet());
 // CORS - allow localhost in dev, configured origins in production
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || origin.match(/^https?:\/\/localhost(:\d+)?$/)) {
+    if (!origin || origin.match(/^https?:\/\/(localhost|10\.\d+\.\d+\.\d+|172\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/)) {
       callback(null, true);
     } else if (config.corsOrigin && origin === config.corsOrigin) {
       callback(null, true);
@@ -87,7 +87,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // ==================== START SERVER ====================
 
-app.listen(config.port, () => {
+app.listen(config.port, '0.0.0.0', () => {
   console.log(`
 ╔════════════════════════════════════════════════════╗
 ║                                                    ║

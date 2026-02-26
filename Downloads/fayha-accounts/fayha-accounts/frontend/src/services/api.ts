@@ -345,6 +345,9 @@ export const salesInvoicesApi = {
   /** Mark a DRAFT invoice as INVOICED and update linked Job Reference. */
   markAsInvoiced: (id: string) =>
     apiFetch<any>(`/sales-invoices/${id}/mark-invoiced`, { method: 'POST' }),
+  /** Report an invoice to ZATCA (simulated clearance). */
+  reportToZatca: (id: string) =>
+    apiFetch<any>(`/sales-invoices/${id}/report-zatca`, { method: 'POST' }),
 };
 
 export const invoiceServicesApi = createCrudApi<any>('invoice-services');

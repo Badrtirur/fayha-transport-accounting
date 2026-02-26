@@ -24,6 +24,7 @@ async function main() {
   await prisma.clientOPB.deleteMany();
   await prisma.payableOPB.deleteMany();
   await prisma.payableExpense.deleteMany();
+  await prisma.clientService.deleteMany();
   await prisma.invoiceService.deleteMany();
   await prisma.fileVerification.deleteMany();
   await prisma.dailyWorkOrder.deleteMany();
@@ -133,7 +134,7 @@ async function main() {
     { code: '2100', name: 'Vehicle Loans', nameAr: 'قروض المركبات', type: 'LIABILITY', subType: 'LONG_TERM_LIABILITY', openingBalance: 450000 },
     { code: '2110', name: 'Equipment Financing', nameAr: 'تمويل المعدات', type: 'LIABILITY', subType: 'LONG_TERM_LIABILITY', openingBalance: 180000 },
     { code: '3010', name: "Owner's Capital", nameAr: 'رأس مال المالك', type: 'EQUITY', subType: 'CAPITAL', openingBalance: 2000000 },
-    { code: '3020', name: 'Retained Earnings', nameAr: 'الأرباح المحتجزة', type: 'EQUITY', subType: 'RETAINED_EARNINGS', openingBalance: 485000 },
+    { code: '3020', name: 'Retained Earnings', nameAr: 'الأرباح المحتجزة', type: 'EQUITY', subType: 'RETAINED_EARNINGS', openingBalance: -58500 },
     { code: '3030', name: 'Drawings', nameAr: 'المسحوبات', type: 'EQUITY', subType: 'DRAWINGS', openingBalance: -50000 },
     { code: '4010', name: 'Transportation Revenue', nameAr: 'إيرادات النقل', type: 'REVENUE', subType: 'OPERATING_REVENUE', openingBalance: 890000 },
     { code: '4020', name: 'Customs Clearance Fees', nameAr: 'رسوم التخليص الجمركي', type: 'REVENUE', subType: 'OPERATING_REVENUE', openingBalance: 425000 },
@@ -176,6 +177,27 @@ async function main() {
     });
   }
   console.log(`✅ ${accounts.length} Accounts created`);
+
+  // Link Bank Accounts to their Chart of Accounts entries via bankId
+  const bankCodeMap: Record<string, string> = {
+    'ARB': '1020',   // Al Rajhi Bank
+    'SNB': '1021',   // Saudi National Bank
+    'RB': '1022',    // Riyad Bank
+    'SABB': '1023',  // SABB Bank
+    'ALN': '1024',   // Alinma Bank
+    'BAJ': '1025',   // Bank AlJazira
+  };
+  for (let i = 0; i < banks.length; i++) {
+    const bankCode = banks[i].code;
+    const accountCode = bankCodeMap[bankCode];
+    if (accountCode) {
+      await prisma.account.updateMany({
+        where: { code: accountCode },
+        data: { bankId: banks[i].id },
+      });
+    }
+  }
+  console.log('✅ Bank accounts linked to chart of accounts');
 
   // ==================== CUSTOMERS ====================
   console.log('Creating customers...');
@@ -983,45 +1005,346 @@ async function main() {
   await prisma.bankTransaction.createMany({
     data: [
       // Al Rajhi Bank transactions
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-05'), type: 'CREDIT', description: 'Client advance received - Saudi Aramco', reference: 'ADV-2026-0002', amount: 100000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0001', isReconciled: true },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-10'), type: 'CREDIT', description: 'Client advance received - IKEA', reference: 'ADV-2026-0001', amount: 50000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0002', isReconciled: true },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-25'), type: 'CREDIT', description: 'Payment received - Panda Retail', reference: 'RCV-2026-0001', amount: 87000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0003', isReconciled: true },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-31'), type: 'DEBIT', description: 'Staff salaries - January 2026', reference: 'SAL-JAN-2026', amount: 125000, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-SAL-001', isReconciled: true },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-31'), type: 'DEBIT', description: 'Fuel payment - Al Madinah Fuel', reference: 'PE-2026-0002', amount: 13800, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-2026-0001', isReconciled: true },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-03'), type: 'DEBIT', description: 'Cash transfer to SNB', reference: 'DEP-2026-0001', amount: 15000, documentType: 'TRANSFER', documentRef: 'TRF-001', isReconciled: false },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-05'), type: 'DEBIT', description: 'Insurance premium - National Insurance', reference: 'INS-2026-Q1', amount: 18750, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-INS-001', isReconciled: false },
-      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-10'), type: 'CREDIT', description: 'SABIC advance payment', reference: 'SABIC-ADV-001', amount: 75000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0003', isReconciled: false },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-05'), type: 'CREDIT', description: 'Client advance received - Saudi Aramco', reference: 'ADV-2026-0002', amount: 100000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0001', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-10'), type: 'CREDIT', description: 'Client advance received - IKEA', reference: 'ADV-2026-0001', amount: 50000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0002', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-25'), type: 'CREDIT', description: 'Payment received - Panda Retail', reference: 'RCV-2026-0001', amount: 87000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0003', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-31'), type: 'DEBIT', description: 'Staff salaries - January 2026', reference: 'SAL-JAN-2026', amount: 125000, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-SAL-001', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-01-31'), type: 'DEBIT', description: 'Fuel payment - Al Madinah Fuel', reference: 'PE-2026-0002', amount: 13800, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-2026-0001', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-03'), type: 'DEBIT', description: 'Cash transfer to SNB', reference: 'DEP-2026-0001', amount: 15000, documentType: 'TRANSFER', documentRef: 'TRF-001', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-05'), type: 'DEBIT', description: 'Insurance premium - National Insurance', reference: 'INS-2026-Q1', amount: 18750, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-INS-001', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-10'), type: 'CREDIT', description: 'SABIC advance payment', reference: 'SABIC-ADV-001', amount: 75000, documentType: 'RECEIPT', documentRef: 'RCV-2026-0003', reconciliationStatus: 'UNRECONCILED' },
       // SNB transactions
-      { bankAccountId: banks[1].id, transactionDate: new Date('2026-02-03'), type: 'CREDIT', description: 'Transfer from Al Rajhi', reference: 'DEP-2026-0001', amount: 15000, documentType: 'TRANSFER', documentRef: 'TRF-001', isReconciled: false },
-      { bankAccountId: banks[1].id, transactionDate: new Date('2026-02-08'), type: 'DEBIT', description: 'Port charges - Jeddah Islamic Port', reference: 'PE-2026-0001', amount: 9775, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-PORT-001', isReconciled: false },
+      { bankAccountId: banks[1].id, transactionDate: new Date('2026-02-03'), type: 'CREDIT', description: 'Transfer from Al Rajhi', reference: 'DEP-2026-0001', amount: 15000, documentType: 'TRANSFER', documentRef: 'TRF-001', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[1].id, transactionDate: new Date('2026-02-08'), type: 'DEBIT', description: 'Port charges - Jeddah Islamic Port', reference: 'PE-2026-0001', amount: 9775, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-PORT-001', reconciliationStatus: 'UNRECONCILED' },
       // Riyad Bank transactions
-      { bankAccountId: banks[2].id, transactionDate: new Date('2026-02-01'), type: 'CREDIT', description: 'Aramco export invoice payment', reference: 'SINV-2026-0003', amount: 17825, documentType: 'RECEIPT', documentRef: 'RCV-2026-0002', isReconciled: false },
-      { bankAccountId: banks[2].id, transactionDate: new Date('2026-02-08'), type: 'DEBIT', description: 'Dammam port storage charges', reference: 'PE-2026-0004', amount: 7475, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-PORT-002', isReconciled: false },
+      { bankAccountId: banks[2].id, transactionDate: new Date('2026-02-01'), type: 'CREDIT', description: 'Aramco export invoice payment', reference: 'SINV-2026-0003', amount: 17825, documentType: 'RECEIPT', documentRef: 'RCV-2026-0002', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[2].id, transactionDate: new Date('2026-02-08'), type: 'DEBIT', description: 'Dammam port storage charges', reference: 'PE-2026-0004', amount: 7475, documentType: 'PAYMENT_VOUCHER', documentRef: 'PVC-PORT-002', reconciliationStatus: 'UNRECONCILED' },
     ]
   });
   console.log('✅ 12 Bank Transactions created');
 
-  // ==================== COUNTERS ====================
-  await prisma.counter.createMany({
+  // =====================================================================
+  // EXPANDED DATA - Adding 100+ more records across all sections
+  // =====================================================================
+
+  // ==================== ADDITIONAL CUSTOMERS (7 more = 15 total) ====================
+  console.log('Creating additional customers...');
+  const moreCustomers = await Promise.all([
+    prisma.customer.create({ data: { code: 'CUST-009', name: 'Bin Laden Group', nameAr: 'مجموعة بن لادن', contactPerson: 'Khalid Ibrahim', phone: '+966-12-640-1000', email: 'logistics@binladen.sa', city: 'Jeddah', category: 'Construction', paymentTermDays: 45, outstandingBalance: 180000, creditLimit: 1500000, vatNumber: '300033333300003', crNumber: '4030111222' } }),
+    prisma.customer.create({ data: { code: 'CUST-010', name: 'STC (Saudi Telecom)', nameAr: 'الاتصالات السعودية', contactPerson: 'Nasser Al-Dossari', phone: '+966-11-452-0000', email: 'procurement@stc.sa', city: 'Riyadh', category: 'Telecom', paymentTermDays: 30, outstandingBalance: 42000, creditLimit: 600000, vatNumber: '300044444400003', crNumber: '1010222333' } }),
+    prisma.customer.create({ data: { code: 'CUST-011', name: 'Mobily (Etihad Etisalat)', nameAr: 'موبايلي', contactPerson: 'Saleh Al-Qahtani', phone: '+966-11-450-5000', email: 'supply@mobily.sa', city: 'Riyadh', category: 'Telecom', paymentTermDays: 30, outstandingBalance: 28000, creditLimit: 400000, vatNumber: '300055555500003', crNumber: '1010333444' } }),
+    prisma.customer.create({ data: { code: 'CUST-012', name: 'Nahdi Medical Company', nameAr: 'شركة النهدي الطبية', contactPerson: 'Dr. Ayman Bakr', phone: '+966-12-669-5000', email: 'warehouse@nahdi.sa', city: 'Jeddah', category: 'Healthcare', paymentTermDays: 30, outstandingBalance: 55000, creditLimit: 500000, vatNumber: '300066666600003', crNumber: '4030444555' } }),
+    prisma.customer.create({ data: { code: 'CUST-013', name: 'Al Faisaliah Group', nameAr: 'مجموعة الفيصلية', contactPerson: 'Omar Al-Faisal', phone: '+966-11-465-2000', email: 'imports@alfaisaliah.sa', city: 'Riyadh', category: 'Conglomerate', paymentTermDays: 45, outstandingBalance: 115000, creditLimit: 2000000, vatNumber: '300077777700003', crNumber: '1010555666' } }),
+    prisma.customer.create({ data: { code: 'CUST-014', name: 'Saudi Electricity Company', nameAr: 'الشركة السعودية للكهرباء', contactPerson: 'Saad Al-Shammari', phone: '+966-11-474-0000', email: 'logistics@se.com.sa', city: 'Riyadh', category: 'Utilities', paymentTermDays: 60, outstandingBalance: 320000, creditLimit: 5000000, vatNumber: '300088888800003', crNumber: '1010666777' } }),
+    prisma.customer.create({ data: { code: 'CUST-015', name: 'ACWA Power', nameAr: 'أكوا باور', contactPerson: 'Majid Al-Harbi', phone: '+966-11-510-0000', email: 'procurement@acwapower.com', city: 'Riyadh', category: 'Energy', paymentTermDays: 45, outstandingBalance: 195000, creditLimit: 3000000, vatNumber: '300099999900003', crNumber: '1010777888' } }),
+  ]);
+  console.log('✅ 7 More Customers created (15 total)');
+
+  // ==================== ADDITIONAL CONSIGNEES (3 more = 8 total) ====================
+  console.log('Creating additional consignees...');
+  await Promise.all([
+    prisma.consignee.create({ data: { code: 'CON-006', name: 'Bin Laden Construction Site', nameAr: 'موقع إنشاء بن لادن', contactPerson: 'Site Manager', phone: '+966-12-640-2000', city: 'Jeddah', warehouseLocation: 'King Abdullah Economic City' } }),
+    prisma.consignee.create({ data: { code: 'CON-007', name: 'STC Warehouse Riyadh', nameAr: 'مستودع STC الرياض', contactPerson: 'Receiving Dept', phone: '+966-11-452-1111', city: 'Riyadh', warehouseLocation: 'Industrial Area 3, Riyadh' } }),
+    prisma.consignee.create({ data: { code: 'CON-008', name: 'Nahdi Distribution Center', nameAr: 'مركز توزيع النهدي', contactPerson: 'Warehouse Ops', phone: '+966-12-669-6000', city: 'Jeddah', warehouseLocation: 'South Jeddah Logistics Zone' } }),
+  ]);
+  console.log('✅ 3 More Consignees created (8 total)');
+
+  // ==================== ADDITIONAL VENDORS (4 more = 12 total) ====================
+  console.log('Creating additional vendors...');
+  const moreVendors = await Promise.all([
+    prisma.vendor.create({ data: { code: 'VND-009', name: 'DHL Express Saudi', nameAr: 'دي إتش إل إكسبرس', contactPerson: 'Courier Ops', phone: '+966-11-474-1111', email: 'ops@dhl.sa', city: 'Riyadh', category: 'Courier', paymentTermDays: 15, outstandingBalance: 8500 } }),
+    prisma.vendor.create({ data: { code: 'VND-010', name: 'Maersk Line Saudi', nameAr: 'ميرسك لاين', contactPerson: 'Booking Dept', phone: '+966-12-647-2222', email: 'booking@maersk.sa', city: 'Jeddah', category: 'Shipping Line', paymentTermDays: 30, outstandingBalance: 65000 } }),
+    prisma.vendor.create({ data: { code: 'VND-011', name: 'Arabian Auto Agency', nameAr: 'الوكالة العربية للسيارات', contactPerson: 'Fleet Sales', phone: '+966-11-456-3333', email: 'fleet@arabianauto.sa', city: 'Riyadh', category: 'Vehicle Dealer', paymentTermDays: 60, outstandingBalance: 0 } }),
+    prisma.vendor.create({ data: { code: 'VND-012', name: 'SEC Power Supply', nameAr: 'توريدات الكهرباء', contactPerson: 'Commercial Dept', phone: '+966-11-474-4444', email: 'commercial@sec.sa', city: 'Riyadh', category: 'Utilities', paymentTermDays: 30, outstandingBalance: 12000 } }),
+  ]);
+  console.log('✅ 4 More Vendors created (12 total)');
+
+  // ==================== ADDITIONAL SALESMEN (2 more = 5 total) ====================
+  console.log('Creating additional salesmen...');
+  const moreSalesmen = await Promise.all([
+    prisma.salesman.create({ data: { code: 'SM-004', name: 'Faris Al-Dosari', nameAr: 'فارس الدوسري', phone: '+966-55-400-5004', email: 'faris.sm@fayha-transport.sa', commission: 3.5 } }),
+    prisma.salesman.create({ data: { code: 'SM-005', name: 'Rakan Al-Otaibi', nameAr: 'راكان العتيبي', phone: '+966-55-500-6005', email: 'rakan.sm@fayha-transport.sa', commission: 4.5 } }),
+  ]);
+  console.log('✅ 2 More Salesmen created (5 total)');
+
+  // ==================== ADDITIONAL JOB REFERENCES (10 more = 15 total) ====================
+  console.log('Creating additional job references...');
+  const moreJobRefs = await Promise.all([
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0006', status: 'COMPLETED', clientId: customers[3].id, direction: 'IMPORT', modeOfTransport: 'SEA', categoryId: categories[0].id, titleId: titles[0].id, salesmanId: salesmen[0].id, controllerId: controllers[0].id, awbBl: 'MAEU22233344', origin: 'Tokyo, Japan', destination: 'Jeddah, KSA', pol: 'JPTYO', pod: 'SAJED', shipper: 'Toyota Motor Corp', commercialInvoiceNo: 'CI-2026-1006', commercialInvoiceValue: 450000, grossWeight: 35000, packages: 200, containers: { create: [{ containerNumber: 'MAEU2223001', containerType: '40HC', sealNumber: 'SL201001', weight: 18000 }, { containerNumber: 'MAEU2223002', containerType: '40HC', sealNumber: 'SL201002', weight: 17000 }] } } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0007', status: 'IN_PROGRESS', clientId: moreCustomers[0].id, direction: 'IMPORT', modeOfTransport: 'SEA', categoryId: categories[2].id, titleId: titles[5].id, salesmanId: salesmen[1].id, controllerId: controllers[1].id, awbBl: 'EGLV55566677', origin: 'Hamburg, Germany', destination: 'Jeddah, KSA', pol: 'DEHAM', pod: 'SAJED', shipper: 'ThyssenKrupp AG', commercialInvoiceNo: 'CI-2026-1007', commercialInvoiceValue: 890000, grossWeight: 72000, packages: 50, pallets: 50, containers: { create: [{ containerNumber: 'EGLV5556001', containerType: '40FR', sealNumber: 'SL301001', weight: 24000 }, { containerNumber: 'EGLV5556002', containerType: '40FR', sealNumber: 'SL301002', weight: 24000 }, { containerNumber: 'EGLV5556003', containerType: '40FR', sealNumber: 'SL301003', weight: 24000 }] } } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0008', status: 'OPEN', clientId: moreCustomers[1].id, direction: 'IMPORT', modeOfTransport: 'AIR', categoryId: categories[0].id, titleId: titles[1].id, salesmanId: moreSalesmen[0].id, controllerId: controllers[0].id, awbBl: '180-87654321', origin: 'Shenzhen, China', destination: 'Riyadh, KSA', pol: 'CNSZN', pod: 'SARYD', shipper: 'Huawei Technologies', airline: 'Emirates SkyCargo', flightNumber: 'EK3412', commercialInvoiceNo: 'CI-2026-1008', commercialInvoiceValue: 320000, grossWeight: 4500, packages: 300 } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0009', status: 'COMPLETED', clientId: moreCustomers[3].id, direction: 'IMPORT', modeOfTransport: 'AIR', categoryId: categories[0].id, titleId: titles[1].id, salesmanId: moreSalesmen[1].id, controllerId: controllers[2].id, awbBl: '176-11122233', origin: 'Basel, Switzerland', destination: 'Jeddah, KSA', pol: 'CHBSL', pod: 'SAKJA', shipper: 'Novartis Pharma AG', airline: 'Saudia Cargo', flightNumber: 'SV6891', commercialInvoiceNo: 'CI-2026-1009', commercialInvoiceValue: 2100000, grossWeight: 1200, packages: 80, notes: 'Temperature controlled - pharmaceutical cargo' } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0010', status: 'IN_PROGRESS', clientId: moreCustomers[4].id, direction: 'IMPORT', modeOfTransport: 'SEA', categoryId: categories[2].id, titleId: titles[5].id, salesmanId: salesmen[2].id, controllerId: controllers[1].id, awbBl: 'OOLU33344455', origin: 'Rotterdam, Netherlands', destination: 'Dammam, KSA', pol: 'NLRTM', pod: 'SADAM', shipper: 'Siemens AG', commercialInvoiceNo: 'CI-2026-1010', commercialInvoiceValue: 1500000, grossWeight: 95000, packages: 120, containers: { create: [{ containerNumber: 'OOLU3334001', containerType: '40OT', sealNumber: 'SL401001', weight: 32000 }, { containerNumber: 'OOLU3334002', containerType: '40OT', sealNumber: 'SL401002', weight: 32000 }, { containerNumber: 'OOLU3334003', containerType: '40OT', sealNumber: 'SL401003', weight: 31000 }] } } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0011', status: 'OPEN', clientId: moreCustomers[5].id, direction: 'IMPORT', modeOfTransport: 'SEA', categoryId: categories[0].id, titleId: titles[0].id, salesmanId: moreSalesmen[0].id, controllerId: controllers[0].id, awbBl: 'HLCU88899900', origin: 'Mumbai, India', destination: 'Dammam, KSA', pol: 'INNSA', pod: 'SADAM', shipper: 'Bharat Heavy Electricals', commercialInvoiceNo: 'CI-2026-1011', commercialInvoiceValue: 780000, grossWeight: 52000, packages: 40 } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0012', status: 'COMPLETED', clientId: moreCustomers[6].id, direction: 'IMPORT', modeOfTransport: 'SEA', categoryId: categories[2].id, titleId: titles[5].id, salesmanId: moreSalesmen[1].id, controllerId: controllers[2].id, awbBl: 'CMAU11122233', origin: 'Busan, South Korea', destination: 'Jubail, KSA', pol: 'KRPUS', pod: 'SARUH', shipper: 'Samsung Engineering', commercialInvoiceNo: 'CI-2026-1012', commercialInvoiceValue: 2800000, grossWeight: 120000, packages: 60 } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0013', status: 'IN_PROGRESS', clientId: customers[7].id, direction: 'IMPORT', modeOfTransport: 'AIR', categoryId: categories[0].id, titleId: titles[1].id, salesmanId: salesmen[0].id, controllerId: controllers[0].id, awbBl: '176-44455566', origin: 'London, UK', destination: 'Riyadh, KSA', pol: 'GBLHR', pod: 'SARYD', shipper: 'Apple Distribution Int.', airline: 'British Airways Cargo', flightNumber: 'BA129', commercialInvoiceNo: 'CI-2026-1013', commercialInvoiceValue: 950000, grossWeight: 2800, packages: 500 } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0014', status: 'OPEN', clientId: customers[4].id, direction: 'IMPORT', modeOfTransport: 'LAND', categoryId: categories[3].id, titleId: titles[7].id, salesmanId: salesmen[1].id, controllerId: controllers[1].id, awbBl: 'LND-2026-001', origin: 'Dubai, UAE', destination: 'Riyadh, KSA', truckPlate: 'KSA-TRK-4455', driverName: 'Ahmad Al-Balushi', driverPhone: '+971-50-111-2233', commercialInvoiceNo: 'CI-2026-1014', commercialInvoiceValue: 125000, grossWeight: 18000, packages: 90 } }),
+    prisma.jobReference.create({ data: { jobNumber: 'JOB-2026-0015', status: 'COMPLETED', clientId: customers[5].id, direction: 'EXPORT', modeOfTransport: 'SEA', categoryId: categories[1].id, titleId: titles[3].id, salesmanId: salesmen[2].id, controllerId: controllers[2].id, awbBl: 'MAEU99900011', origin: 'Jeddah, KSA', destination: 'Dar es Salaam, Tanzania', pol: 'SAJED', pod: 'TZDAR', shipper: 'Almarai Company', commercialInvoiceNo: 'CI-2026-1015', commercialInvoiceValue: 420000, grossWeight: 28000, packages: 600, containers: { create: [{ containerNumber: 'MAEU9990001', containerType: '40RF', sealNumber: 'SL501001', weight: 14000 }, { containerNumber: 'MAEU9990002', containerType: '40RF', sealNumber: 'SL501002', weight: 14000 }] } } }),
+  ]);
+  console.log('✅ 10 More Job References created (15 total)');
+
+  // ==================== ADDITIONAL SALES INVOICES (7 more = 10 total) ====================
+  console.log('Creating additional sales invoices...');
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0004', clientId: customers[3].id, jobReferenceId: moreJobRefs[0].id, salesmanId: salesmen[0].id, invoiceDate: new Date('2026-02-05'), dueDate: new Date('2026-03-07'), saleMethod: 'CREDIT', subtotal: 12800, vatRate: 0.15, vatAmount: 1920, totalAmount: 14720, balanceDue: 14720, status: 'SENT', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 2500, vatRate: 0.15, vatAmount: 375, totalAmount: 2875 }, { lineNumber: 2, serviceId: services[23].id, nameEn: 'TRANSPORTATION', nameAr: 'النقل', amount: 6800, vatRate: 0.15, vatAmount: 1020, totalAmount: 7820 }, { lineNumber: 3, serviceId: services[11].id, nameEn: 'Labour Charges', nameAr: 'رسوم العمالة', amount: 3500, vatRate: 0.15, vatAmount: 525, totalAmount: 4025 }] } } });
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0005', clientId: moreCustomers[0].id, jobReferenceId: moreJobRefs[1].id, salesmanId: salesmen[1].id, invoiceDate: new Date('2026-02-08'), dueDate: new Date('2026-03-25'), saleMethod: 'CREDIT', subtotal: 28500, vatRate: 0.15, vatAmount: 4275, totalAmount: 32775, balanceDue: 32775, status: 'DRAFT', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 4500, vatRate: 0.15, vatAmount: 675, totalAmount: 5175 }, { lineNumber: 2, serviceId: services[30].id, nameEn: 'Sea Freight Charges', nameAr: 'رسوم شحن بحري', amount: 18000, vatRate: 0.15, vatAmount: 2700, totalAmount: 20700 }, { lineNumber: 3, serviceId: services[11].id, nameEn: 'Labour and Handling', nameAr: 'عمالة ومناولة', amount: 6000, vatRate: 0.15, vatAmount: 900, totalAmount: 6900 }] } } });
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0006', clientId: moreCustomers[3].id, jobReferenceId: moreJobRefs[3].id, salesmanId: moreSalesmen[1].id, invoiceDate: new Date('2026-02-10'), dueDate: new Date('2026-03-12'), saleMethod: 'CREDIT', subtotal: 8200, vatRate: 0.15, vatAmount: 1230, totalAmount: 9430, balanceDue: 0, paidAmount: 9430, status: 'PAID', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 3500, vatRate: 0.15, vatAmount: 525, totalAmount: 4025 }, { lineNumber: 2, serviceId: services[29].id, nameEn: 'Air Freight Charges', nameAr: 'رسوم شحن جوي', amount: 4700, vatRate: 0.15, vatAmount: 705, totalAmount: 5405 }] } } });
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0007', clientId: moreCustomers[1].id, jobReferenceId: moreJobRefs[2].id, salesmanId: moreSalesmen[0].id, invoiceDate: new Date('2026-02-12'), dueDate: new Date('2026-03-14'), saleMethod: 'CREDIT', subtotal: 6500, vatRate: 0.15, vatAmount: 975, totalAmount: 7475, balanceDue: 7475, status: 'SENT', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 2000, vatRate: 0.15, vatAmount: 300, totalAmount: 2300 }, { lineNumber: 2, serviceId: services[29].id, nameEn: 'Air Freight', nameAr: 'شحن جوي', amount: 4500, vatRate: 0.15, vatAmount: 675, totalAmount: 5175 }] } } });
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0008', clientId: moreCustomers[4].id, jobReferenceId: moreJobRefs[4].id, salesmanId: salesmen[2].id, invoiceDate: new Date('2026-02-14'), dueDate: new Date('2026-03-31'), saleMethod: 'CREDIT', subtotal: 42000, vatRate: 0.15, vatAmount: 6300, totalAmount: 48300, balanceDue: 48300, status: 'SENT', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 5000, vatRate: 0.15, vatAmount: 750, totalAmount: 5750 }, { lineNumber: 2, serviceId: services[30].id, nameEn: 'Sea Freight', nameAr: 'شحن بحري', amount: 25000, vatRate: 0.15, vatAmount: 3750, totalAmount: 28750 }, { lineNumber: 3, serviceId: services[11].id, nameEn: 'Labour', nameAr: 'عمالة', amount: 8000, vatRate: 0.15, vatAmount: 1200, totalAmount: 9200 }, { lineNumber: 4, serviceId: services[40].id, nameEn: 'Crane Charges', nameAr: 'رسوم رافعة', amount: 4000, vatRate: 0.15, vatAmount: 600, totalAmount: 4600 }] } } });
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0009', clientId: customers[5].id, jobReferenceId: moreJobRefs[9].id, salesmanId: salesmen[2].id, invoiceDate: new Date('2026-02-16'), dueDate: new Date('2026-03-18'), saleMethod: 'CREDIT', subtotal: 18500, vatRate: 0.15, vatAmount: 2775, totalAmount: 21275, balanceDue: 10000, paidAmount: 11275, status: 'PARTIAL', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 3500, vatRate: 0.15, vatAmount: 525, totalAmount: 4025 }, { lineNumber: 2, serviceId: services[30].id, nameEn: 'Sea Freight', nameAr: 'شحن بحري', amount: 12000, vatRate: 0.15, vatAmount: 1800, totalAmount: 13800 }, { lineNumber: 3, serviceId: services[17].id, nameEn: 'Documentation', nameAr: 'توثيق', amount: 3000, vatRate: 0.15, vatAmount: 450, totalAmount: 3450 }] } } });
+  await prisma.salesInvoice.create({ data: { invoiceNumber: 'SINV-2026-0010', clientId: moreCustomers[6].id, jobReferenceId: moreJobRefs[6].id, salesmanId: moreSalesmen[1].id, invoiceDate: new Date('2026-02-18'), dueDate: new Date('2026-04-04'), saleMethod: 'CREDIT', subtotal: 55000, vatRate: 0.15, vatAmount: 8250, totalAmount: 63250, balanceDue: 63250, status: 'INVOICED', items: { create: [{ lineNumber: 1, serviceId: services[0].id, nameEn: 'Clearance Charges', nameAr: 'رسوم التخليص', amount: 8000, vatRate: 0.15, vatAmount: 1200, totalAmount: 9200 }, { lineNumber: 2, serviceId: services[30].id, nameEn: 'Sea Freight', nameAr: 'شحن بحري', amount: 35000, vatRate: 0.15, vatAmount: 5250, totalAmount: 40250 }, { lineNumber: 3, serviceId: services[11].id, nameEn: 'Labour', nameAr: 'عمالة', amount: 12000, vatRate: 0.15, vatAmount: 1800, totalAmount: 13800 }] } } });
+  console.log('✅ 7 More Sales Invoices created (10 total)');
+
+  // ==================== ADDITIONAL EXPENSE ENTRIES (10 more = 15 total) ====================
+  console.log('Creating additional expense entries...');
+  await prisma.expenseEntry.createMany({
     data: [
-      { name: 'INVOICE', prefix: 'INV', value: 0, year: 2026 },
-      { name: 'BILL', prefix: 'BILL', value: 0, year: 2026 },
-      { name: 'PAYMENT', prefix: 'PAY', value: 0, year: 2026 },
-      { name: 'PAYMENT', prefix: 'REC', value: 0, year: 2026 },
-      { name: 'JOURNAL', prefix: 'JE', value: 10, year: 2026 },
-      { name: 'SALES_INVOICE', prefix: 'SINV', value: 3, year: 2026 },
-      { name: 'JOB', prefix: 'JOB', value: 5, year: 2026 },
-      { name: 'EXPENSE', prefix: 'EXP', value: 5, year: 2026 },
-      { name: 'ADVANCE', prefix: 'ADV', value: 3, year: 2026 },
-      { name: 'SHIPMENT', prefix: 'SHP', value: 5, year: 2026 },
-      { name: 'DWO', prefix: 'DWO', value: 5, year: 2026 },
-      { name: 'QUOTE', prefix: 'SQ', value: 3, year: 2026 },
-      { name: 'PAYABLE_EXPENSE', prefix: 'PE', value: 4, year: 2026 },
-      { name: 'RCV_PVC', prefix: 'RCV', value: 3, year: 2026 },
-      { name: 'RCV_PVC', prefix: 'PVC', value: 2, year: 2026 },
-      { name: 'FILE_VERIFICATION', prefix: 'FV', value: 5, year: 2026 },
+      { expenseNumber: 'EXP-2026-0006', date: new Date('2026-02-11'), amount: 4200, vatAmount: 630, totalAmount: 4830, paymentMethod: 'BANK_TRANSFER', category: 'Storage', description: 'Warehouse storage fees for Bin Laden shipment', reference: 'STR-FEB-001', status: 'APPROVED', jobRefId: moreJobRefs[1].id },
+      { expenseNumber: 'EXP-2026-0007', date: new Date('2026-02-12'), amount: 1800, vatAmount: 270, totalAmount: 2070, paymentMethod: 'CASH', category: 'Transport', description: 'Local delivery charges to STC warehouse', reference: 'TRN-FEB-001', status: 'APPROVED', jobRefId: moreJobRefs[2].id },
+      { expenseNumber: 'EXP-2026-0008', date: new Date('2026-02-13'), amount: 6500, vatAmount: 975, totalAmount: 7475, paymentMethod: 'BANK_TRANSFER', category: 'Port Charges', description: 'Dammam port container handling - SEC shipment', reference: 'PORT-FEB-002', status: 'APPROVED', jobRefId: moreJobRefs[5].id },
+      { expenseNumber: 'EXP-2026-0009', date: new Date('2026-02-14'), amount: 15000, vatAmount: 2250, totalAmount: 17250, paymentMethod: 'BANK_TRANSFER', category: 'Customs Charges', description: 'Import customs duties for Al Faisaliah Group', reference: 'CUST-FEB-001', status: 'PENDING', jobRefId: moreJobRefs[4].id },
+      { expenseNumber: 'EXP-2026-0010', date: new Date('2026-02-15'), amount: 2800, vatAmount: 420, totalAmount: 3220, paymentMethod: 'CASH', category: 'Fuel', description: 'Diesel refueling for fleet - February batch 1', reference: 'FUEL-FEB-001', status: 'APPROVED' },
+      { expenseNumber: 'EXP-2026-0011', date: new Date('2026-02-16'), amount: 3500, vatAmount: 525, totalAmount: 4025, paymentMethod: 'BANK_TRANSFER', category: 'Insurance', description: 'Vehicle insurance renewal - BHA 5678', reference: 'INS-VEH-002', status: 'APPROVED' },
+      { expenseNumber: 'EXP-2026-0012', date: new Date('2026-02-17'), amount: 8000, vatAmount: 1200, totalAmount: 9200, paymentMethod: 'BANK_TRANSFER', category: 'Container Detention', description: 'Container detention charges - Maersk Line', reference: 'DET-FEB-001', status: 'PENDING', jobRefId: moreJobRefs[0].id },
+      { expenseNumber: 'EXP-2026-0013', date: new Date('2026-02-18'), amount: 950, vatAmount: 142.5, totalAmount: 1092.5, paymentMethod: 'CASH', category: 'Office Supplies', description: 'Printer paper, toner, and stationery', reference: 'OFF-FEB-002', status: 'APPROVED' },
+      { expenseNumber: 'EXP-2026-0014', date: new Date('2026-02-19'), amount: 125000, vatAmount: 0, totalAmount: 125000, paymentMethod: 'BANK_TRANSFER', category: 'Salary', description: 'February 2026 staff salaries', reference: 'SAL-FEB-2026', status: 'APPROVED' },
+      { expenseNumber: 'EXP-2026-0015', date: new Date('2026-02-20'), amount: 5500, vatAmount: 825, totalAmount: 6325, paymentMethod: 'BANK_TRANSFER', category: 'Maintenance', description: 'Truck repair and tire replacement - BHA 9012', reference: 'MNT-FEB-002', status: 'APPROVED', jobRefId: moreJobRefs[3].id },
     ]
   });
+  console.log('✅ 10 More Expense Entries created (15 total)');
+
+  // ==================== ADDITIONAL JOURNAL ENTRIES (15 more = 25 total) ====================
+  console.log('Creating additional journal entries...');
+
+  // JE-11: Revenue - Abdul Latif Jameel import clearance
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0011', date: new Date('2026-02-05'), description: 'Revenue - Abdul Latif Jameel import clearance SINV-2026-0004', reference: 'SINV-2026-0004', referenceType: 'SALES_INVOICE', totalDebit: 14720, totalCredit: 14720, status: 'POSTED', postedAt: new Date('2026-02-05'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-05'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[7].id, debitAmount: 14720, creditAmount: 0, description: 'AR - Abdul Latif Jameel', customerId: customers[3].id }, { lineNumber: 2, accountId: dbAccounts[26].id, debitAmount: 0, creditAmount: 12800, description: 'Transport revenue' }, { lineNumber: 3, accountId: dbAccounts[17].id, debitAmount: 0, creditAmount: 1920, description: 'Output VAT 15%' }] } } });
+
+  // JE-12: Bin Laden Group freight forwarding
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0012', date: new Date('2026-02-08'), description: 'Revenue - Bin Laden Group freight forwarding SINV-2026-0005', reference: 'SINV-2026-0005', referenceType: 'SALES_INVOICE', totalDebit: 32775, totalCredit: 32775, status: 'POSTED', postedAt: new Date('2026-02-08'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-08'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[7].id, debitAmount: 32775, creditAmount: 0, description: 'AR - Bin Laden Group', customerId: moreCustomers[0].id }, { lineNumber: 2, accountId: dbAccounts[28].id, debitAmount: 0, creditAmount: 28500, description: 'Freight forwarding income' }, { lineNumber: 3, accountId: dbAccounts[17].id, debitAmount: 0, creditAmount: 4275, description: 'Output VAT 15%' }] } } });
+
+  // JE-13: Nahdi Medical paid invoice
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0013', date: new Date('2026-02-10'), description: 'Revenue - Nahdi Medical air clearance SINV-2026-0006 (PAID)', reference: 'SINV-2026-0006', referenceType: 'SALES_INVOICE', totalDebit: 9430, totalCredit: 9430, status: 'POSTED', postedAt: new Date('2026-02-10'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-10'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[1].id, debitAmount: 9430, creditAmount: 0, description: 'Cash received - Al Rajhi Bank' }, { lineNumber: 2, accountId: dbAccounts[27].id, debitAmount: 0, creditAmount: 8200, description: 'Customs clearance fees revenue' }, { lineNumber: 3, accountId: dbAccounts[17].id, debitAmount: 0, creditAmount: 1230, description: 'Output VAT 15%' }] } } });
+
+  // JE-14: Storage expense posting
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0014', date: new Date('2026-02-11'), description: 'Warehouse storage expense - Bin Laden shipment', reference: 'EXP-2026-0006', referenceType: 'EXPENSE', totalDebit: 4830, totalCredit: 4830, status: 'POSTED', postedAt: new Date('2026-02-11'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-11'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[39].id, debitAmount: 4200, creditAmount: 0, description: 'Warehouse rent expense' }, { lineNumber: 2, accountId: dbAccounts[9].id, debitAmount: 630, creditAmount: 0, description: 'Input VAT on storage' }, { lineNumber: 3, accountId: dbAccounts[1].id, debitAmount: 0, creditAmount: 4830, description: 'Paid via Al Rajhi Bank' }] } } });
+
+  // JE-15: Port charges - Dammam
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0015', date: new Date('2026-02-13'), description: 'Port charges - Dammam container handling for SEC', reference: 'EXP-2026-0008', referenceType: 'EXPENSE', totalDebit: 7475, totalCredit: 7475, status: 'POSTED', postedAt: new Date('2026-02-13'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-13'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[38].id, debitAmount: 6500, creditAmount: 0, description: 'Port & terminal charges - Dammam' }, { lineNumber: 2, accountId: dbAccounts[9].id, debitAmount: 975, creditAmount: 0, description: 'Input VAT on port charges' }, { lineNumber: 3, accountId: dbAccounts[15].id, debitAmount: 0, creditAmount: 7475, description: 'AP - King Abdulaziz Port', vendorId: vendors[7].id }] } } });
+
+  // JE-16: Customs duties - Al Faisaliah
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0016', date: new Date('2026-02-14'), description: 'Customs duties - Al Faisaliah Group import', reference: 'EXP-2026-0009', referenceType: 'EXPENSE', totalDebit: 17250, totalCredit: 17250, status: 'POSTED', postedAt: new Date('2026-02-14'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-14'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[37].id, debitAmount: 15000, creditAmount: 0, description: 'Customs & government fees' }, { lineNumber: 2, accountId: dbAccounts[9].id, debitAmount: 2250, creditAmount: 0, description: 'Input VAT on customs' }, { lineNumber: 3, accountId: dbAccounts[19].id, debitAmount: 0, creditAmount: 17250, description: 'Customs duties payable', vendorId: vendors[0].id }] } } });
+
+  // JE-17: Fuel expense
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0017', date: new Date('2026-02-15'), description: 'Diesel fuel expense - February batch 1', reference: 'EXP-2026-0010', referenceType: 'EXPENSE', totalDebit: 3220, totalCredit: 3220, status: 'POSTED', postedAt: new Date('2026-02-15'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-15'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[35].id, debitAmount: 2800, creditAmount: 0, description: 'Fuel & diesel expenses' }, { lineNumber: 2, accountId: dbAccounts[9].id, debitAmount: 420, creditAmount: 0, description: 'Input VAT on fuel' }, { lineNumber: 3, accountId: dbAccounts[0].id, debitAmount: 0, creditAmount: 3220, description: 'Paid from petty cash' }] } } });
+
+  // JE-18: Al Faisaliah revenue
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0018', date: new Date('2026-02-14'), description: 'Revenue - Al Faisaliah Group import clearance SINV-2026-0008', reference: 'SINV-2026-0008', referenceType: 'SALES_INVOICE', totalDebit: 48300, totalCredit: 48300, status: 'POSTED', postedAt: new Date('2026-02-14'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-14'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[7].id, debitAmount: 48300, creditAmount: 0, description: 'AR - Al Faisaliah Group', customerId: moreCustomers[4].id }, { lineNumber: 2, accountId: dbAccounts[26].id, debitAmount: 0, creditAmount: 42000, description: 'Transportation revenue' }, { lineNumber: 3, accountId: dbAccounts[17].id, debitAmount: 0, creditAmount: 6300, description: 'Output VAT 15%' }] } } });
+
+  // JE-19: Insurance expense
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0019', date: new Date('2026-02-16'), description: 'Vehicle insurance renewal - BHA 5678', reference: 'EXP-2026-0011', referenceType: 'EXPENSE', totalDebit: 4025, totalCredit: 4025, status: 'POSTED', postedAt: new Date('2026-02-16'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-16'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[41].id, debitAmount: 3500, creditAmount: 0, description: 'Insurance expense' }, { lineNumber: 2, accountId: dbAccounts[9].id, debitAmount: 525, creditAmount: 0, description: 'Input VAT on insurance' }, { lineNumber: 3, accountId: dbAccounts[1].id, debitAmount: 0, creditAmount: 4025, description: 'Paid via Al Rajhi Bank' }] } } });
+
+  // JE-20: ACWA Power revenue
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0020', date: new Date('2026-02-18'), description: 'Revenue - ACWA Power import clearance SINV-2026-0010', reference: 'SINV-2026-0010', referenceType: 'SALES_INVOICE', totalDebit: 63250, totalCredit: 63250, status: 'POSTED', postedAt: new Date('2026-02-18'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-18'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[7].id, debitAmount: 63250, creditAmount: 0, description: 'AR - ACWA Power', customerId: moreCustomers[6].id }, { lineNumber: 2, accountId: dbAccounts[28].id, debitAmount: 0, creditAmount: 55000, description: 'Freight forwarding income' }, { lineNumber: 3, accountId: dbAccounts[17].id, debitAmount: 0, creditAmount: 8250, description: 'Output VAT 15%' }] } } });
+
+  // JE-21: February salaries
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0021', date: new Date('2026-02-19'), description: 'February 2026 staff salaries payment', reference: 'SAL-FEB-2026', referenceType: 'SALARY', totalDebit: 125000, totalCredit: 125000, status: 'POSTED', postedAt: new Date('2026-02-19'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-19'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[33].id, debitAmount: 72000, creditAmount: 0, description: 'Driver salaries - February' }, { lineNumber: 2, accountId: dbAccounts[34].id, debitAmount: 53000, creditAmount: 0, description: 'Staff salaries - February' }, { lineNumber: 3, accountId: dbAccounts[1].id, debitAmount: 0, creditAmount: 125000, description: 'Paid via Al Rajhi Bank' }] } } });
+
+  // JE-22: Depreciation for February
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0022', date: new Date('2026-02-20'), description: 'Monthly depreciation - February 2026', reference: 'DEP-FEB-2026', referenceType: 'DEPRECIATION', totalDebit: 6000, totalCredit: 6000, status: 'POSTED', postedAt: new Date('2026-02-20'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-20'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[42].id, debitAmount: 6000, creditAmount: 0, description: 'Depreciation expense - Feb 2026' }, { lineNumber: 2, accountId: dbAccounts[14].id, debitAmount: 0, creditAmount: 6000, description: 'Accumulated depreciation' }] } } });
+
+  // JE-23: Vendor payment - Customs duties
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0023', date: new Date('2026-02-20'), description: 'Vendor payment - Saudi Customs Authority duties', reference: 'PVC-2026-0003', referenceType: 'PAYMENT', totalDebit: 45000, totalCredit: 45000, status: 'POSTED', postedAt: new Date('2026-02-20'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-20'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[19].id, debitAmount: 45000, creditAmount: 0, description: 'Customs duties payable - cleared', vendorId: vendors[0].id }, { lineNumber: 2, accountId: dbAccounts[1].id, debitAmount: 0, creditAmount: 45000, description: 'Paid via Al Rajhi Bank' }] } } });
+
+  // JE-24: Almarai partial payment received
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0024', date: new Date('2026-02-21'), description: 'Partial payment received - Almarai Company SINV-2026-0009', reference: 'RCV-2026-0004', referenceType: 'PAYMENT', totalDebit: 11275, totalCredit: 11275, status: 'POSTED', postedAt: new Date('2026-02-21'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-21'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[2].id, debitAmount: 11275, creditAmount: 0, description: 'Deposited to SNB' }, { lineNumber: 2, accountId: dbAccounts[7].id, debitAmount: 0, creditAmount: 11275, description: 'AR - Almarai partial payment', customerId: customers[5].id }] } } });
+
+  // JE-25: VAT settlement for January
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0025', date: new Date('2026-02-22'), description: 'VAT settlement - January 2026 net VAT payable', reference: 'VAT-JAN-2026', referenceType: 'TAX', totalDebit: 5500, totalCredit: 5500, status: 'POSTED', postedAt: new Date('2026-02-22'), fiscalPeriodId: febPeriod!.id, createdById: admin.id, approvedById: admin.id, approvedAt: new Date('2026-02-22'), lines: { create: [{ lineNumber: 1, accountId: dbAccounts[17].id, debitAmount: 5500, creditAmount: 0, description: 'VAT payable settlement' }, { lineNumber: 2, accountId: dbAccounts[1].id, debitAmount: 0, creditAmount: 5500, description: 'VAT payment via Al Rajhi' }] } } });
+
+  // JE-26: DRAFT - Pending vendor invoice (not yet posted)
+  await prisma.journalEntry.create({ data: { entryNumber: 'JE-2026-0026', date: new Date('2026-02-23'), description: 'DRAFT - Pending vendor invoice for container leasing', reference: 'DRAFT-LEASE-001', referenceType: 'EXPENSE', totalDebit: 18000, totalCredit: 18000, status: 'DRAFT', fiscalPeriodId: febPeriod!.id, createdById: admin.id, lines: { create: [{ lineNumber: 1, accountId: dbAccounts[45].id, debitAmount: 18000, creditAmount: 0, description: 'Container lease expense - pending' }, { lineNumber: 2, accountId: dbAccounts[15].id, debitAmount: 0, creditAmount: 18000, description: 'AP - container leasing vendor' }] } } });
+
+  console.log('✅ 16 More Journal Entries created (26 total)');
+
+  // ==================== ADDITIONAL SHIPMENTS (5 more = 10 total) ====================
+  console.log('Creating additional shipments...');
+  await prisma.shipment.createMany({
+    data: [
+      { shipmentNumber: 'SHP-2026-0006', origin: 'Hamburg, Germany', destination: 'Jeddah, KSA', status: 'IN_TRANSIT', modeOfTransport: 'SEA', carrier: 'Evergreen', etd: new Date('2026-02-10'), eta: new Date('2026-03-05') },
+      { shipmentNumber: 'SHP-2026-0007', origin: 'Shenzhen, China', destination: 'Riyadh, KSA', status: 'IN_TRANSIT', modeOfTransport: 'AIR', carrier: 'Emirates SkyCargo', etd: new Date('2026-02-15'), eta: new Date('2026-02-16') },
+      { shipmentNumber: 'SHP-2026-0008', origin: 'Basel, Switzerland', destination: 'Jeddah, KSA', status: 'DELIVERED', modeOfTransport: 'AIR', carrier: 'Saudia Cargo', etd: new Date('2026-02-01'), eta: new Date('2026-02-02'), atd: new Date('2026-02-01'), ata: new Date('2026-02-02') },
+      { shipmentNumber: 'SHP-2026-0009', origin: 'Rotterdam, Netherlands', destination: 'Dammam, KSA', status: 'IN_TRANSIT', modeOfTransport: 'SEA', carrier: 'MSC', etd: new Date('2026-02-08'), eta: new Date('2026-03-01') },
+      { shipmentNumber: 'SHP-2026-0010', origin: 'Jeddah, KSA', destination: 'Dar es Salaam, Tanzania', status: 'DELIVERED', modeOfTransport: 'SEA', carrier: 'Maersk Line', etd: new Date('2026-02-05'), eta: new Date('2026-02-18'), atd: new Date('2026-02-05'), ata: new Date('2026-02-17') },
+    ]
+  });
+  console.log('✅ 5 More Shipments created (10 total)');
+
+  // ==================== ADDITIONAL DAILY WORK ORDERS (5 more = 10 total) ====================
+  console.log('Creating additional daily work orders...');
+  await prisma.dailyWorkOrder.createMany({
+    data: [
+      { orderNumber: 'DWO-2026-0006', date: new Date('2026-02-15'), assignedTo: 'Salem Al-Otaibi', description: 'Customs clearance for STC equipment at Riyadh Dry Port', location: 'Riyadh Dry Port', status: 'IN_PROGRESS', priority: 'HIGH' },
+      { orderNumber: 'DWO-2026-0007', date: new Date('2026-02-16'), assignedTo: 'Nawaf Al-Shammari', description: 'Container inspection for Al Faisaliah Group heavy equipment', location: 'King Abdulaziz Port, Dammam', status: 'PENDING', priority: 'URGENT' },
+      { orderNumber: 'DWO-2026-0008', date: new Date('2026-02-17'), assignedTo: 'Driver - Saeed', description: 'Deliver pharmaceutical cargo to Nahdi Distribution Center', location: 'South Jeddah Logistics Zone', status: 'COMPLETED', priority: 'HIGH', completedAt: new Date('2026-02-17T16:00:00') },
+      { orderNumber: 'DWO-2026-0009', date: new Date('2026-02-18'), assignedTo: 'Bandar Al-Ghamdi', description: 'ACWA Power - Samsung Engineering equipment documentation', location: 'Jubail Commercial Port', status: 'IN_PROGRESS', priority: 'NORMAL' },
+      { orderNumber: 'DWO-2026-0010', date: new Date('2026-02-19'), assignedTo: 'Driver - Faisal', description: 'Reefer container delivery - Almarai export to Tanzania', location: 'Jeddah Islamic Port', status: 'COMPLETED', priority: 'HIGH', completedAt: new Date('2026-02-19T11:30:00') },
+    ]
+  });
+  console.log('✅ 5 More Daily Work Orders created (10 total)');
+
+  // ==================== ADDITIONAL SALES QUOTES (3 more = 6 total) ====================
+  console.log('Creating additional sales quotes...');
+  await prisma.salesQuote.createMany({
+    data: [
+      { quoteNumber: 'SQ-2026-0004', clientName: 'Al Othaim Markets', clientEmail: 'logistics@othaim.sa', clientPhone: '+966-11-286-0000', quoteDate: new Date('2026-02-15'), validUntil: new Date('2026-03-15'), subtotal: 15000, vatAmount: 2250, totalAmount: 17250, status: 'SENT', items: JSON.stringify([{ service: 'Import Clearance + Transport', amount: 15000 }]) },
+      { quoteNumber: 'SQ-2026-0005', clientName: 'Zamil Steel Buildings', clientEmail: 'supply@zamil.sa', clientPhone: '+966-13-358-0000', quoteDate: new Date('2026-02-18'), validUntil: new Date('2026-03-18'), subtotal: 45000, vatAmount: 6750, totalAmount: 51750, status: 'DRAFT', items: JSON.stringify([{ service: 'FCL Sea Import Clearance', amount: 25000 }, { service: 'Heavy Equipment Transport', amount: 20000 }]) },
+      { quoteNumber: 'SQ-2026-0006', clientName: 'Tanmiah Food Company', clientEmail: 'warehouse@tanmiah.sa', clientPhone: '+966-11-477-1234', quoteDate: new Date('2026-02-20'), validUntil: new Date('2026-03-20'), subtotal: 9800, vatAmount: 1470, totalAmount: 11270, status: 'ACCEPTED', items: JSON.stringify([{ service: 'Cold Chain Import Clearance', amount: 6300 }, { service: 'Reefer Transport', amount: 3500 }]) },
+    ]
+  });
+  console.log('✅ 3 More Sales Quotes created (6 total)');
+
+  // ==================== ADDITIONAL FILE VERIFICATIONS (3 more = 8 total) ====================
+  console.log('Creating additional file verifications...');
+  await prisma.fileVerification.createMany({
+    data: [
+      { fileNumber: 'FV-2026-0006', jobReferenceNum: 'JOB-2026-0007', clientName: 'Bin Laden Group', documentType: 'Bill of Lading', status: 'IN_REVIEW', verifiedBy: 'Ahmed Al-Rashidi' },
+      { fileNumber: 'FV-2026-0007', jobReferenceNum: 'JOB-2026-0009', clientName: 'Nahdi Medical Company', documentType: 'Pharma Certificate', status: 'VERIFIED', verifiedBy: 'Sara Al-Otaibi', verifiedAt: new Date('2026-02-03'), notes: 'Temperature control certificate verified' },
+      { fileNumber: 'FV-2026-0008', jobReferenceNum: 'JOB-2026-0012', clientName: 'ACWA Power', documentType: 'Certificate of Origin', status: 'PENDING', notes: 'Awaiting Korean embassy attestation' },
+    ]
+  });
+  console.log('✅ 3 More File Verifications created (8 total)');
+
+  // ==================== ADDITIONAL CRM LEADS (4 more = 8 total) ====================
+  console.log('Creating additional CRM leads...');
+  await prisma.cRMLead.createMany({
+    data: [
+      { name: 'Rashid Al-Dosari', company: 'National Water Company', email: 'logistics@nwc.sa', phone: '+966-11-600-0000', source: 'REFERRAL', status: 'QUALIFIED', priority: 'HIGH', assignedTo: 'Abdullah Al-Mutairi', nextFollowUp: new Date('2026-02-25'), notes: 'Large pipe imports from Germany, monthly volumes' },
+      { name: 'Salem Al-Obaidi', company: 'Riyadh Metro Company', email: 'supply@riyadhmetro.sa', phone: '+966-11-255-0000', source: 'COLD_CALL', status: 'NEW', priority: 'HIGH', notes: 'Metro construction parts - ongoing project 3 years' },
+      { name: 'Fatimah Al-Sharif', company: 'Saudi Steel Pipe Co.', email: 'imports@saudisteel.sa', phone: '+966-13-340-8000', source: 'EXHIBITION', status: 'CONTACTED', priority: 'MEDIUM', assignedTo: 'Turki Al-Harbi', nextFollowUp: new Date('2026-03-01'), notes: 'Raw materials import from India and China' },
+      { name: 'Ibrahim Al-Naimi', company: 'Tasnee (NATIONAL INDUSTRIALIZATION)', email: 'logistics@tasnee.sa', phone: '+966-11-401-0000', source: 'LINKEDIN', status: 'PROPOSAL', priority: 'HIGH', assignedTo: 'Saud Al-Qahtani', nextFollowUp: new Date('2026-02-28'), notes: 'Chemical import clearance - potential annual contract SAR 2M+' },
+    ]
+  });
+  console.log('✅ 4 More CRM Leads created (8 total)');
+
+  // ==================== ADDITIONAL PAYABLE EXPENSES (4 more = 8 total) ====================
+  console.log('Creating additional payable expenses...');
+  await prisma.payableExpense.createMany({
+    data: [
+      { expenseNumber: 'PE-2026-0005', vendorId: vendors[4].id, date: new Date('2026-02-10'), dueDate: new Date('2026-03-12'), amount: 18000, vatAmount: 2700, totalAmount: 20700, balanceDue: 20700, category: 'Container Leasing', description: 'Feb container lease charges', status: 'UNPAID' },
+      { expenseNumber: 'PE-2026-0006', vendorId: moreVendors[0].id, date: new Date('2026-02-12'), dueDate: new Date('2026-02-27'), amount: 3500, vatAmount: 525, totalAmount: 4025, balanceDue: 4025, category: 'Courier', description: 'DHL document courier services', status: 'UNPAID' },
+      { expenseNumber: 'PE-2026-0007', vendorId: moreVendors[1].id, date: new Date('2026-02-15'), dueDate: new Date('2026-03-17'), amount: 65000, vatAmount: 9750, totalAmount: 74750, balanceDue: 74750, category: 'Shipping', description: 'Maersk sea freight charges', status: 'UNPAID' },
+      { expenseNumber: 'PE-2026-0008', vendorId: moreVendors[3].id, date: new Date('2026-02-18'), dueDate: new Date('2026-03-20'), amount: 8500, vatAmount: 1275, totalAmount: 9775, balanceDue: 0, paidAmount: 9775, category: 'Utilities', description: 'February electricity bill', status: 'PAID' },
+    ]
+  });
+  console.log('✅ 4 More Payable Expenses created (8 total)');
+
+  // ==================== ADDITIONAL CLIENT ADVANCES (2 more = 5 total) ====================
+  console.log('Creating additional client advances...');
+  await prisma.clientAdvance.createMany({
+    data: [
+      { advanceNumber: 'ADV-2026-0004', clientId: moreCustomers[4].id, amount: 200000, date: new Date('2026-02-10'), paymentMethod: 'BANK_TRANSFER', reference: 'FAISALIAH-ADV-001', description: 'Advance for heavy equipment import clearance', status: 'ACTIVE', usedAmount: 48300, remainingAmount: 151700 },
+      { advanceNumber: 'ADV-2026-0005', clientId: moreCustomers[6].id, amount: 150000, date: new Date('2026-02-15'), paymentMethod: 'BANK_TRANSFER', reference: 'ACWA-ADV-001', description: 'Advance for Samsung Engineering import', status: 'ACTIVE', usedAmount: 63250, remainingAmount: 86750 },
+    ]
+  });
+  console.log('✅ 2 More Client Advances created (5 total)');
+
+  // ==================== ADDITIONAL OPB (3+3 more) ====================
+  console.log('Creating additional OPB entries...');
+  await prisma.clientOPB.createMany({
+    data: [
+      { clientId: moreCustomers[0].id, date: new Date('2026-01-01'), debitAmount: 180000, description: 'Opening balance - Bin Laden Group', reference: 'OPB-2025' },
+      { clientId: moreCustomers[4].id, date: new Date('2026-01-01'), debitAmount: 115000, description: 'Opening balance - Al Faisaliah Group', reference: 'OPB-2025' },
+      { clientId: moreCustomers[5].id, date: new Date('2026-01-01'), debitAmount: 320000, description: 'Opening balance - Saudi Electricity Company', reference: 'OPB-2025' },
+    ]
+  });
+  await prisma.payableOPB.createMany({
+    data: [
+      { vendorId: moreVendors[0].id, date: new Date('2026-01-01'), creditAmount: 8500, description: 'Opening balance - DHL Express', reference: 'OPB-2025' },
+      { vendorId: moreVendors[1].id, date: new Date('2026-01-01'), creditAmount: 65000, description: 'Opening balance - Maersk Line', reference: 'OPB-2025' },
+      { vendorId: moreVendors[3].id, date: new Date('2026-01-01'), creditAmount: 12000, description: 'Opening balance - SEC Power', reference: 'OPB-2025' },
+    ]
+  });
+  console.log('✅ 3+3 More OPB entries created (8+8 total)');
+
+  // ==================== ADDITIONAL VEHICLES (3 more = 8 total) ====================
+  console.log('Creating additional vehicles...');
+  await prisma.vehicle.createMany({
+    data: [
+      { plateNumber: 'BHA 3456', make: 'MAN', model: 'TGX 26.480', year: 2024, type: 'TRUCK', driver: 'Yousef Al-Harbi', status: 'ACTIVE', location: 'Dammam Port', fuelLevel: 78, mileage: 15200, nextServiceDate: new Date('2026-04-15') },
+      { plateNumber: 'BHA 7890', make: 'DAF', model: 'XF 530', year: 2023, type: 'TRUCK', driver: 'Nasser Al-Qahtani', status: 'ACTIVE', location: 'Jeddah Depot', fuelLevel: 55, mileage: 52300, nextServiceDate: new Date('2026-03-20') },
+      { plateNumber: 'TRL 1234', make: 'Schmitz', model: 'Flat Bed', year: 2024, type: 'TRAILER', driver: null, status: 'ACTIVE', location: 'Jubail Port', fuelLevel: 0, mileage: 8500 },
+    ]
+  });
+  console.log('✅ 3 More Vehicles created (8 total)');
+
+  // ==================== ADDITIONAL ASSETS (3 more = 8 total) ====================
+  console.log('Creating additional assets...');
+  await prisma.asset.createMany({
+    data: [
+      { name: 'Reach Stacker - Kalmar DRG450', category: 'Equipment', purchaseDate: new Date('2024-01-15'), cost: 450000, currentValue: 382500, depreciationRate: 10, location: 'Dammam Port', status: 'ACTIVE' },
+      { name: 'HP LaserJet Pro MFP (x3)', category: 'IT Equipment', purchaseDate: new Date('2025-06-01'), cost: 15000, currentValue: 12750, depreciationRate: 20, location: 'Head Office', status: 'ACTIVE' },
+      { name: 'Container Chassis - 40ft (x5)', category: 'Equipment', purchaseDate: new Date('2023-09-10'), cost: 250000, currentValue: 187500, depreciationRate: 10, location: 'Riyadh Depot', status: 'ACTIVE' },
+    ]
+  });
+  console.log('✅ 3 More Assets created (8 total)');
+
+  // ==================== ADDITIONAL RCV/PVC (3 more = 8 total) ====================
+  console.log('Creating additional RCV/PVC vouchers...');
+  await prisma.rcvPvc.createMany({
+    data: [
+      { type: 'RCV', voucherNo: 'RCV-2026-0004', date: new Date('2026-02-21'), clientId: customers[5].id, amount: 11275, reference: 'SINV-2026-0009', status: 'POSTED', notes: 'Partial payment from Almarai' },
+      { type: 'PVC', voucherNo: 'PVC-2026-0003', date: new Date('2026-02-20'), vendorId: vendors[0].id, amount: 45000, reference: 'CUST-DUTY', status: 'POSTED', notes: 'Customs duties payment' },
+      { type: 'RCV', voucherNo: 'RCV-2026-0005', date: new Date('2026-02-10'), clientId: moreCustomers[3].id, amount: 9430, reference: 'SINV-2026-0006', status: 'POSTED', notes: 'Nahdi Medical full payment' },
+    ]
+  });
+  console.log('✅ 3 More RCV/PVC Vouchers created (8 total)');
+
+  // ==================== ADDITIONAL BANK TRANSACTIONS (13 more = 25 total) ====================
+  console.log('Creating additional bank transactions...');
+  await prisma.bankTransaction.createMany({
+    data: [
+      // Al Rajhi (banks[0])
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-10'), type: 'CREDIT', description: 'Nahdi Medical payment received', reference: 'SINV-2026-0006', amount: 9430, documentType: 'RECEIPT', documentRef: 'RCV-2026-0005', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-11'), type: 'DEBIT', description: 'Warehouse storage payment', reference: 'EXP-2026-0006', amount: 4830, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-16'), type: 'DEBIT', description: 'Vehicle insurance - BHA 5678', reference: 'EXP-2026-0011', amount: 4025, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-19'), type: 'DEBIT', description: 'February staff salaries', reference: 'SAL-FEB-2026', amount: 125000, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-20'), type: 'DEBIT', description: 'Customs duties payment', reference: 'PVC-2026-0003', amount: 45000, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      { bankAccountId: banks[0].id, transactionDate: new Date('2026-02-22'), type: 'DEBIT', description: 'VAT settlement January', reference: 'VAT-JAN-2026', amount: 5500, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      // SNB (banks[1])
+      { bankAccountId: banks[1].id, transactionDate: new Date('2026-02-21'), type: 'CREDIT', description: 'Almarai partial payment', reference: 'SINV-2026-0009', amount: 11275, documentType: 'RECEIPT', documentRef: 'RCV-2026-0004', reconciliationStatus: 'UNRECONCILED' },
+      // Riyad Bank (banks[2])
+      { bankAccountId: banks[2].id, transactionDate: new Date('2026-02-13'), type: 'DEBIT', description: 'Port charges Dammam - SEC', reference: 'EXP-2026-0008', amount: 7475, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      // SABB (banks[3])
+      { bankAccountId: banks[3].id, transactionDate: new Date('2026-02-10'), type: 'CREDIT', description: 'Al Faisaliah Group advance', reference: 'ADV-2026-0004', amount: 200000, documentType: 'RECEIPT', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[3].id, transactionDate: new Date('2026-02-18'), type: 'DEBIT', description: 'Maersk freight charges', reference: 'PE-2026-0007', amount: 74750, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+      // Alinma (banks[4])
+      { bankAccountId: banks[4].id, transactionDate: new Date('2026-02-15'), type: 'CREDIT', description: 'ACWA Power advance', reference: 'ADV-2026-0005', amount: 150000, documentType: 'RECEIPT', reconciliationStatus: 'RECONCILED' },
+      { bankAccountId: banks[4].id, transactionDate: new Date('2026-02-18'), type: 'DEBIT', description: 'SEC electricity bill', reference: 'PE-2026-0008', amount: 9775, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'RECONCILED' },
+      // Bank AlJazira (banks[5])
+      { bankAccountId: banks[5].id, transactionDate: new Date('2026-02-12'), type: 'DEBIT', description: 'DHL courier services', reference: 'PE-2026-0006', amount: 4025, documentType: 'PAYMENT_VOUCHER', reconciliationStatus: 'UNRECONCILED' },
+    ]
+  });
+  console.log('✅ 13 More Bank Transactions created (25 total)');
+
+  // ==================== COUNTERS ====================
+  const counters = [
+    { name: 'INVOICE', prefix: 'INV', value: 0, year: 2026 },
+    { name: 'BILL', prefix: 'BILL', value: 0, year: 2026 },
+    { name: 'PAYMENT', prefix: 'PAY', value: 0, year: 2026 },
+    { name: 'JOURNAL', prefix: 'JE', value: 25, year: 2026 },
+    { name: 'SALES_INVOICE', prefix: 'SINV', value: 10, year: 2026 },
+    { name: 'JOB', prefix: 'JOB', value: 15, year: 2026 },
+    { name: 'EXPENSE', prefix: 'EXP', value: 15, year: 2026 },
+    { name: 'ADVANCE', prefix: 'ADV', value: 5, year: 2026 },
+    { name: 'SHIPMENT', prefix: 'SHP', value: 10, year: 2026 },
+    { name: 'DWO', prefix: 'DWO', value: 10, year: 2026 },
+    { name: 'QUOTE', prefix: 'SQ', value: 6, year: 2026 },
+    { name: 'PAYABLE_EXPENSE', prefix: 'PE', value: 8, year: 2026 },
+    { name: 'RCV_PVC', prefix: 'RCV', value: 5, year: 2026 },
+    { name: 'FILE_VERIFICATION', prefix: 'FV', value: 8, year: 2026 },
+  ];
+  for (const c of counters) {
+    await prisma.counter.upsert({ where: { name_year: { name: c.name, year: c.year } }, update: { value: c.value, prefix: c.prefix }, create: c });
+  }
 
   // ==================== SETTINGS ====================
   await prisma.setting.createMany({
@@ -1044,39 +1367,41 @@ async function main() {
   });
   console.log('✅ Settings & counters created');
 
-  console.log('\n🎉 Database seeded successfully!');
-  console.log('\n📋 Summary:');
+  console.log('\n🎉 Database seeded successfully with EXPANDED data!');
+  console.log('\n📋 Summary (100+ entries across all sections):');
   console.log('   Users:             6');
   console.log('   Bank Accounts:     6');
   console.log('   Chart of Accounts: 48');
-  console.log('   Customers:         8');
-  console.log('   Consignees:        5');
-  console.log('   Vendors:           8');
+  console.log('   Customers:         15');
+  console.log('   Consignees:        8');
+  console.log('   Vendors:           12');
   console.log('   Job Categories:    5');
   console.log('   Job Titles:        9');
   console.log('   Job Controllers:   3');
-  console.log('   Salesmen:          3');
+  console.log('   Salesmen:          5');
   console.log('   Invoice Services:  66');
   console.log('   Terminals:         8');
   console.log('   Port Handling:     6');
   console.log('   FCL/LCL Types:     8');
-  console.log('   Job References:    5');
-  console.log('   Sales Invoices:    3');
-  console.log('   Shipments:         5');
-  console.log('   Daily Work Orders: 5');
-  console.log('   Sales Quotes:      3');
-  console.log('   File Verifications: 5');
-  console.log('   CRM Leads:         4');
-  console.log('   Expense Entries:   5');
-  console.log('   Payable Expenses:  4');
-  console.log('   Client Advances:   3');
-  console.log('   Client OPB:        5');
-  console.log('   Payable OPB:       5');
-  console.log('   Vehicles (Fleet):  5');
-  console.log('   Assets:            5');
-  console.log('   RCV/PVC Vouchers:  5');
-  console.log('   Journal Entries:   10');
-  console.log('   Bank Transactions: 12');
+  console.log('   Job References:    15');
+  console.log('   Sales Invoices:    10');
+  console.log('   Shipments:         10');
+  console.log('   Daily Work Orders: 10');
+  console.log('   Sales Quotes:      6');
+  console.log('   File Verifications: 8');
+  console.log('   CRM Leads:         8');
+  console.log('   Expense Entries:   15');
+  console.log('   Payable Expenses:  8');
+  console.log('   Client Advances:   5');
+  console.log('   Client OPB:        8');
+  console.log('   Payable OPB:       8');
+  console.log('   Vehicles (Fleet):  8');
+  console.log('   Assets:            8');
+  console.log('   RCV/PVC Vouchers:  8');
+  console.log('   Journal Entries:   25');
+  console.log('   Bank Transactions: 25');
+  console.log('   ──────────────────────');
+  console.log('   TOTAL RECORDS:     350+');
   console.log('\n📋 Login Credentials:');
   console.log('   Admin:      admin@fayha-transport.sa / admin123');
   console.log('   Accountant: accountant@fayha-transport.sa / admin123');
