@@ -7,7 +7,10 @@ import { Request, Response } from 'express';
 import prisma from '../config/database';
 import { generateNumber } from '../utils/helpers';
 import { generateZatcaFields, simulateZatcaReport } from '../utils/zatca';
+import { generateInvoicePdf } from '../utils/pdf-generator';
 import * as XLSX from 'xlsx';
+import fs from 'fs';
+import path from 'path';
 
 interface CrudOptions {
   allowedFields?: string[];
@@ -960,6 +963,103 @@ export const salesInvoiceController = {
 
       res.json({ success: true, data: updated });
     } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+  async generatePdf(req: Request, res: Response) {
+    try {
+      const invoice = await prisma.salesInvoice.findUnique({
+        where: { id: req.params.id },
+        include: { client: true, items: true, jobReference: true },
+      });
+      if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
+
+      const force = req.query.force === 'true' || req.body?.force === true;
+
+      // Check if Document already exists for this invoice
+      const existing = await prisma.document.findFirst({
+        where: { entityType: 'SalesInvoice', entityId: invoice.id, documentType: 'PDF' },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (existing && !force) {
+        // Verify file still exists on disk
+        if (fs.existsSync(path.resolve(existing.filePath))) {
+          return res.json({
+            success: true,
+            data: {
+              url: `/uploads/pdfs/${existing.fileName}`,
+              documentId: existing.id,
+              cached: true,
+            },
+          });
+        }
+        // File missing from disk — regenerate
+      }
+
+      // Load settings for company info
+      const settings = await prisma.setting.findMany();
+      const settingsMap: Record<string, string> = {};
+      for (const s of settings) settingsMap[s.key] = s.value;
+
+      // Load banks
+      const banks = await prisma.bankAccount.findMany({
+        where: { isActive: true },
+        take: 2,
+      });
+
+      const companyInfo = {
+        name: settingsMap['COMPANY_NAME'] || undefined,
+        nameAr: settingsMap['COMPANY_NAME_AR'] || undefined,
+        vatNumber: settingsMap['COMPANY_VAT_NUMBER'] || undefined,
+        crNumber: settingsMap['COMPANY_CR_NUMBER'] || undefined,
+        address: settingsMap['COMPANY_ADDRESS'] || undefined,
+        phone1: settingsMap['COMPANY_PHONE'] || undefined,
+        email: settingsMap['COMPANY_EMAIL'] || undefined,
+      };
+
+      const bankInfos = banks.map((b: any) => ({
+        bankName: b.bankName,
+        accountNumber: b.accountNumber,
+        ibanNumber: b.ibanNumber,
+        swiftCode: b.swiftCode,
+        branchName: b.branchName,
+      }));
+
+      const { filePath, fileName } = await generateInvoicePdf(invoice as any, companyInfo, bankInfos);
+
+      // Get file size
+      const stat = fs.statSync(filePath);
+
+      // Delete old document record if regenerating
+      if (existing) {
+        await prisma.document.delete({ where: { id: existing.id } });
+      }
+
+      // Create Document record
+      const document = await prisma.document.create({
+        data: {
+          fileName,
+          filePath,
+          fileSize: stat.size,
+          mimeType: 'application/pdf',
+          documentType: 'PDF',
+          entityType: 'SalesInvoice',
+          entityId: invoice.id,
+          uploadedBy: (req as any).user?.id || null,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          url: `/uploads/pdfs/${fileName}`,
+          documentId: document.id,
+          cached: false,
+        },
+      });
+    } catch (error: any) {
+      console.error('PDF generation failed:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   },

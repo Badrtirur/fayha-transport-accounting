@@ -115,9 +115,35 @@ const SalesInvoicePreview: React.FC = () => {
   const handlePrint = () => window.print();
 
   const handleDownloadPDF = useCallback(async () => {
-    if (!printRef.current) return;
+    if (!id) return;
     try {
       setDownloading(true);
+      // Try server-side PDF generation first
+      const result = await salesInvoicesApi.generatePdf(id);
+      if (result?.url) {
+        // Build absolute URL for download
+        const baseUrl = import.meta.env.VITE_API_URL || '/api/v1';
+        const downloadUrl = baseUrl.replace(/\/api\/v1$/, '') + result.url;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `${invoice?.invoiceNo || (invoice as any)?.invoiceNumber || 'invoice'}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success(result.cached ? 'PDF downloaded (cached)' : 'PDF generated and downloaded');
+        return;
+      }
+    } catch (serverErr) {
+      console.warn('Server PDF failed, falling back to client-side:', serverErr);
+    }
+
+    // Fallback: client-side PDF generation
+    if (!printRef.current) {
+      toast.error('Failed to generate PDF.');
+      setDownloading(false);
+      return;
+    }
+    try {
       const html2canvas = (await import('html2canvas')).default;
       const { jsPDF } = await import('jspdf');
 
@@ -146,14 +172,14 @@ const SalesInvoicePreview: React.FC = () => {
 
       const invNo = invoice?.invoiceNo || (invoice as any)?.invoiceNumber || 'invoice';
       pdf.save(`${invNo}.pdf`);
-      toast.success('PDF downloaded');
+      toast.success('PDF downloaded (client-side)');
     } catch (err) {
       console.error('PDF generation failed:', err);
       toast.error('Failed to generate PDF. Use Print instead.');
     } finally {
       setDownloading(false);
     }
-  }, [invoice]);
+  }, [id, invoice]);
 
   const handleEmail = () => {
     const invNo = invoice?.invoiceNo || (invoice as any)?.invoiceNumber || '';

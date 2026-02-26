@@ -8,6 +8,7 @@ import {
   MoreVertical,
   Pencil,
   FileDown,
+  Download,
   Printer,
   MessageCircle,
   ShieldCheck,
@@ -25,7 +26,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { SalesInvoice, InvoiceCategory, Client } from '../../types';
-import { salesInvoicesApi, customersApi, jobReferencesApi, banksApi, journalsApi, clientAdvancesApi } from '../../services/api';
+import { salesInvoicesApi, customersApi, jobReferencesApi, banksApi, journalsApi, clientAdvancesApi, API_BASE } from '../../services/api';
 import Pagination from '../../components/common/Pagination';
 
 const formatDate = (d: any): string => {
@@ -600,7 +601,32 @@ const SalesInvoiceList: React.FC = () => {
                                   className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
                                 >
                                   <FileDown className="h-3.5 w-3.5 text-slate-400" />
-                                  PDF
+                                  PDF Preview
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    setOpenDropdown(null);
+                                    const toastId = toast.loading('Generating PDF...');
+                                    try {
+                                      const result = await salesInvoicesApi.generatePdf(inv.id);
+                                      if (result?.url) {
+                                        const baseUrl = API_BASE.replace(/\/api\/v1$/, '');
+                                        const link = document.createElement('a');
+                                        link.href = baseUrl + result.url;
+                                        link.download = `${inv.invoiceNumber || inv.invoiceNo || 'invoice'}.pdf`;
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                        toast.success(result.cached ? 'PDF downloaded' : 'PDF generated', { id: toastId });
+                                      }
+                                    } catch (err: any) {
+                                      toast.error(err?.message || 'PDF generation failed', { id: toastId });
+                                    }
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
+                                >
+                                  <Download className="h-3.5 w-3.5 text-slate-400" />
+                                  Download PDF
                                 </button>
                                 <button
                                   onClick={() => {

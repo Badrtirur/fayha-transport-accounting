@@ -44,6 +44,7 @@ import {
   customerImportController,
 } from '../controllers/clearance.controller';
 import { transactionController } from '../controllers/transaction.controller';
+import { documentController } from '../controllers/document.controller';
 
 const router = Router();
 
@@ -145,7 +146,12 @@ crudRoutes('/job-references', jobReferenceController);
 router.post('/sales-invoices/:id/send', authenticate, salesInvoiceController.send);
 router.post('/sales-invoices/:id/mark-invoiced', authenticate, salesInvoiceController.markAsInvoiced);
 router.post('/sales-invoices/:id/report-zatca', authenticate, salesInvoiceController.reportToZatca);
+router.post('/sales-invoices/:id/pdf', authenticate, salesInvoiceController.generatePdf);
 crudRoutes('/sales-invoices', salesInvoiceController);
+
+// ==================== DOCUMENTS ====================
+router.get('/documents/:id/download', authenticate, documentController.download);
+router.get('/documents/entity/:entityType/:entityId', authenticate, documentController.getByEntity);
 crudRoutes('/invoice-services', invoiceServiceController);
 router.get('/client-advances/by-client/:clientId', authenticate, clientAdvanceController.getByClient);
 crudRoutes('/client-advances', clientAdvanceController);

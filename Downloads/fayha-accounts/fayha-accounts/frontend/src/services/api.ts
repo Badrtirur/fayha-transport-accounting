@@ -348,6 +348,12 @@ export const salesInvoicesApi = {
   /** Report an invoice to ZATCA (simulated clearance). */
   reportToZatca: (id: string) =>
     apiFetch<any>(`/sales-invoices/${id}/report-zatca`, { method: 'POST' }),
+  /** Generate and store a server-side PDF for a sales invoice. */
+  generatePdf: (id: string, force?: boolean) =>
+    apiFetch<{ url: string; documentId: string; cached: boolean }>(
+      `/sales-invoices/${id}/pdf`,
+      { method: 'POST', body: JSON.stringify({ force: !!force }) },
+    ),
 };
 
 export const invoiceServicesApi = createCrudApi<any>('invoice-services');
