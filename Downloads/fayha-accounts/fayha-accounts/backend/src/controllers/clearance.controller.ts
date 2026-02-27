@@ -17,6 +17,8 @@ import {
   clearInvoice,
   buildUblXml,
   signInvoiceXml,
+  computeXmlHash,
+  getLastInvoiceHash,
 } from '../utils/zatca';
 import { generateInvoicePdf } from '../utils/pdf-generator';
 import * as XLSX from 'xlsx';
@@ -24,6 +26,8 @@ import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+// @ts-ignore - zatca-xml-js doesn't have TS types
+import { EGS, ZATCASimplifiedTaxInvoice } from 'zatca-xml-js';
 
 interface CrudOptions {
   allowedFields?: string[];
@@ -901,7 +905,12 @@ export const salesInvoiceController = {
 
       // Check if ZATCA is onboarded (production CSID exists)
       const zatcaSettings = await prisma.setting.findMany({
-        where: { key: { in: ['ZATCA_PRODUCTION_CSID', 'ZATCA_PRODUCTION_SECRET', 'ZATCA_PRIVATE_KEY', 'COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_ADDRESS', 'COMPANY_CITY'] } },
+        where: { key: { in: [
+          'ZATCA_PRODUCTION_CSID', 'ZATCA_PRODUCTION_SECRET', 'ZATCA_PRIVATE_KEY',
+          'COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_CR_NUMBER',
+          'COMPANY_STREET', 'COMPANY_BUILDING_NO', 'COMPANY_POSTAL_CODE',
+          'COMPANY_CITY', 'COMPANY_DISTRICT', 'COMPANY_COUNTRY',
+        ] } },
       });
       const sm: Record<string, string> = {};
       for (const s of zatcaSettings) sm[s.key] = s.value;
@@ -944,70 +953,107 @@ export const salesInvoiceController = {
         }
       }
 
-      // Real ZATCA API flow
+      // Real ZATCA API flow using zatca-xml-js SDK
       await prisma.salesInvoice.update({
         where: { id: req.params.id },
         data: { zatcaStatus: 'Pending Synchronization' },
       });
 
+      // Also need EGS info and private key body for SDK signing
+      const extraSettings = await prisma.setting.findMany({
+        where: { key: { in: ['ZATCA_EGS_INFO', 'ZATCA_PRIVATE_KEY_BODY'] } },
+      });
+      for (const s of extraSettings) sm[s.key] = s.value;
+
+      if (!sm['ZATCA_EGS_INFO'] || !sm['ZATCA_PRIVATE_KEY_BODY']) {
+        return res.status(400).json({ success: false, error: 'ZATCA keys not found. Complete ZATCA onboarding in Settings.' });
+      }
+
+      const egsInfo = JSON.parse(sm['ZATCA_EGS_INFO']);
+      const privateKeyBody = sm['ZATCA_PRIVATE_KEY_BODY'];
+      const certBase64 = Buffer.from(pcsid, 'base64').toString();
+
       const issueDate = new Date(invoice.invoiceDate || invoice.createdAt);
       const items = (invoice as any).items || [];
-      const lineItems = items.length > 0
-        ? items.map((item: any) => ({
+
+      // Build line items for SDK
+      const sdkLineItems = items.length > 0
+        ? items.map((item: any, idx: number) => ({
+            id: String(idx + 1),
             name: item.description || item.serviceName || 'Service',
             quantity: Number(item.quantity) || 1,
-            unitPrice: Number(item.unitPrice) || Number(item.amount) || 0,
-            vatRate: 15,
-            vatAmount: (Number(item.amount) || 0) * 0.15,
-            lineTotal: Number(item.amount) || 0,
+            tax_exclusive_price: Number(item.unitPrice) || Number(item.amount) || 0,
+            VAT_percent: 0.15,
+            other_taxes: [],
           }))
         : [{
+            id: '1',
             name: 'Services',
             quantity: 1,
-            unitPrice: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
-            vatRate: 15,
-            vatAmount: Number(invoice.vatAmount) || 0,
-            lineTotal: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
+            tax_exclusive_price: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
+            VAT_percent: 0.15,
+            other_taxes: [],
           }];
 
-      const xml = buildUblXml({
-        uuid: invoice.zatcaUuid,
-        invoiceNumber: invoice.invoiceNumber,
-        issueDate: issueDate.toISOString().split('T')[0],
-        issueTime: issueDate.toISOString().split('T')[1]?.substring(0, 8) || '00:00:00',
-        invoiceTypeCode: '388',
-        invoiceSubType: '0200000', // simplified by default
-        sellerName: sm['COMPANY_NAME'] || 'Fayha Arabia Company',
-        sellerVat: sm['COMPANY_VAT_NUMBER'] || '311467026900003',
-        sellerAddress: sm['COMPANY_ADDRESS'] || '',
-        sellerCity: sm['COMPANY_CITY'] || 'Riyadh',
-        sellerCountry: 'SA',
-        buyerName: (invoice as any).client?.name || 'Cash Customer',
-        buyerVat: (invoice as any).client?.vatNumber || '',
-        currency: 'SAR',
-        lineItems,
-        subtotal: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
-        vatTotal: Number(invoice.vatAmount) || 0,
-        grandTotal: Number(invoice.totalAmount) || 0,
-      });
+      // Get ICV (invoice counter) from invoice number
+      const icv = parseInt(invoice.invoiceNumber.replace(/\D/g, '') || '1');
 
-      const signedXml = signInvoiceXml(xml, privateKey, pcsid);
-      const invoiceHash = createHash('sha256').update(signedXml, 'utf-8').digest('base64');
+      // Get previous invoice hash
+      const prevInvoice = await prisma.salesInvoice.findFirst({
+        where: { zatcaStatus: 'Synced With Zatca', id: { not: invoice.id } },
+        orderBy: { createdAt: 'desc' },
+        select: { zatcaHash: true },
+      });
+      const previousHash = prevInvoice?.zatcaHash || 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzcxMGM2MWRhYmYwYWE2M2Q2MDVhZjBhNTQyNA==';
+
+      // Use SDK to build and sign
+      const egsInfoForInvoice = { ...egsInfo, uuid: invoice.zatcaUuid };
+      const inv = new ZATCASimplifiedTaxInvoice({
+        props: {
+          egs_info: egsInfoForInvoice,
+          invoice_counter_number: icv,
+          invoice_serial_number: invoice.invoiceNumber,
+          issue_date: issueDate.toISOString().split('T')[0],
+          issue_time: issueDate.toISOString().split('T')[1]?.substring(0, 8) || '00:00:00',
+          previous_invoice_hash: previousHash,
+          line_items: sdkLineItems,
+        },
+      });
+      const signed = inv.sign(certBase64, privateKeyBody);
+      const uuidMatch = signed.signed_invoice_string.match(/<cbc:UUID>(.*?)<\/cbc:UUID>/);
+      const invoiceUuid = uuidMatch ? uuidMatch[1] : invoice.zatcaUuid;
+      const invoiceBase64 = Buffer.from(signed.signed_invoice_string).toString('base64');
+
+      const ZATCA_URL = process.env.ZATCA_API_URL || 'https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal';
+      const authHeader = 'Basic ' + Buffer.from(pcsid + ':' + psecret).toString('base64');
 
       try {
-        // Use reportInvoice for simplified invoices
-        const result = await reportInvoice(signedXml, invoiceHash, invoice.zatcaUuid, pcsid, psecret);
+        // Report simplified invoice to ZATCA
+        const r = await fetch(`${ZATCA_URL}/invoices/reporting/single`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, 'Accept-Version': 'V2', 'Accept-Language': 'en' },
+          body: JSON.stringify({ invoiceHash: signed.invoice_hash, uuid: invoiceUuid, invoice: invoiceBase64 }),
+        });
+        const result: any = await r.json();
 
+        const isReported = r.ok && (result.reportingStatus === 'REPORTED' || result.clearanceStatus === 'CLEARED');
         const updated = await prisma.salesInvoice.update({
           where: { id: req.params.id },
           data: {
-            zatcaStatus: result.reportingStatus === 'REPORTED' || result.reportingStatus === 'CLEARED' ? 'Synced With Zatca' : 'Rejected',
-            zatcaClearanceId: `ZATCA-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`,
-            zatcaClearedAt: new Date(),
+            zatcaStatus: isReported ? 'Synced With Zatca' : 'Rejected',
+            zatcaHash: signed.invoice_hash,
+            zatcaClearanceId: isReported ? `ZATCA-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` : null,
+            zatcaClearedAt: isReported ? new Date() : null,
           },
           include: { client: true, items: true },
         });
-        res.json({ success: true, data: updated, zatcaResult: result });
+
+        if (isReported) {
+          res.json({ success: true, data: updated, zatcaResult: { reportingStatus: result.reportingStatus, warnings: result.validationResults?.warningMessages?.map((w: any) => w.code) } });
+        } else {
+          const errors = (result.validationResults?.errorMessages || []).map((e: any) => `${e.code}: ${e.message}`);
+          res.json({ success: false, error: `ZATCA rejected: ${errors.join('; ') || result.message || 'Unknown'}`, data: updated });
+        }
       } catch (zatcaError: any) {
         const updated = await prisma.salesInvoice.update({
           where: { id: req.params.id },
@@ -3309,37 +3355,62 @@ export const zatcaController = {
     }
   },
 
-  /** POST /zatca/generate-csr — Generate CSR + keypair */
+  /** POST /zatca/generate-csr — Generate CSR + keypair using zatca-xml-js SDK */
   async generateCsr(req: Request, res: Response) {
     try {
       const companySettings = await prisma.setting.findMany({
-        where: { key: { in: ['COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_CITY'] } },
+        where: { key: { in: [
+          'COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_CR_NUMBER',
+          'COMPANY_CITY', 'COMPANY_DISTRICT', 'COMPANY_STREET',
+          'COMPANY_BUILDING_NO', 'COMPANY_POSTAL_CODE', 'COMPANY_COUNTRY',
+        ] } },
       });
       const sm: Record<string, string> = {};
       for (const s of companySettings) sm[s.key] = s.value;
 
-      const companyName = sm['COMPANY_NAME'] || 'Fayha Arabia Company';
-      const vatNumber = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
-      const city = sm['COMPANY_CITY'] || 'Riyadh';
+      // Build EGS info for zatca-xml-js SDK
+      const egsUuid = uuidv4();
+      const egsInfo = {
+        uuid: egsUuid,
+        custom_id: 'EGS1-886431145',
+        model: 'IOS',
+        CRN_number: sm['COMPANY_CR_NUMBER'] || '1010616141',
+        VAT_name: sm['COMPANY_NAME'] || 'Fayha Arabia Company',
+        VAT_number: sm['COMPANY_VAT_NUMBER'] || '311467026900003',
+        location: {
+          city: sm['COMPANY_CITY'] || 'Riyadh',
+          city_subdivision: sm['COMPANY_DISTRICT'] || 'Al Mishael Dist.',
+          street: sm['COMPANY_STREET'] || 'Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz',
+          plot_identification: sm['COMPANY_BUILDING_NO'] || '8298',
+          building: sm['COMPANY_BUILDING_NO'] || '8298',
+          postal_zone: sm['COMPANY_POSTAL_CODE'] || '14325',
+          country_subentity: sm['COMPANY_COUNTRY'] || 'SA',
+        },
+        branch_name: sm['COMPANY_CITY'] || 'Riyadh',
+        branch_industry: 'Transportation',
+      };
 
-      const { privateKey, csrBase64 } = await generateZatcaCsr({
-        commonName: 'TST-886431145-311467026900003',
-        organizationUnit: city,
-        organization: companyName,
-        country: 'SA',
-        vatNumber,
-        egsSerialNumber: `1-TST|2-TST|3-ed22f1d8-e6a2-1118-9b58-d9a8f11e445f`,
-        location: '14325',
-        industry: 'Transportation',
-        invoiceType: '1100',
-        production: false,
-      });
+      const egs = new EGS(egsInfo);
+      await egs.generateNewKeysAndCSR(false, 'FayhaERP');
+      const info = egs.get();
 
-      // Store in Settings
-      await prisma.setting.upsert({ where: { key: 'ZATCA_PRIVATE_KEY' }, create: { key: 'ZATCA_PRIVATE_KEY', value: privateKey, type: 'STRING', category: 'ZATCA' }, update: { value: privateKey } });
+      // Extract key body (SDK expects without PEM headers)
+      const fullKey = info.private_key || '';
+      const privateKeyBody = fullKey
+        .replace('-----BEGIN EC PRIVATE KEY-----', '')
+        .replace('-----END EC PRIVATE KEY-----', '')
+        .replace(/\n/g, '').trim();
+
+      // Store the full PEM key and CSR
+      const csrBase64 = Buffer.from(info.csr || '').toString('base64');
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRIVATE_KEY' }, create: { key: 'ZATCA_PRIVATE_KEY', value: fullKey, type: 'STRING', category: 'ZATCA' }, update: { value: fullKey } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRIVATE_KEY_BODY' }, create: { key: 'ZATCA_PRIVATE_KEY_BODY', value: privateKeyBody, type: 'STRING', category: 'ZATCA' }, update: { value: privateKeyBody } });
       await prisma.setting.upsert({ where: { key: 'ZATCA_CSR' }, create: { key: 'ZATCA_CSR', value: csrBase64, type: 'STRING', category: 'ZATCA' }, update: { value: csrBase64 } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_EGS_UUID' }, create: { key: 'ZATCA_EGS_UUID', value: egsUuid, type: 'STRING', category: 'ZATCA' }, update: { value: egsUuid } });
+      // Store egsInfo as JSON for later use
+      await prisma.setting.upsert({ where: { key: 'ZATCA_EGS_INFO' }, create: { key: 'ZATCA_EGS_INFO', value: JSON.stringify(egsInfo), type: 'STRING', category: 'ZATCA' }, update: { value: JSON.stringify(egsInfo) } });
 
-      res.json({ success: true, data: { message: 'CSR and keypair generated successfully', csrPreview: csrBase64.substring(0, 60) + '...' } });
+      res.json({ success: true, data: { message: 'CSR and keypair generated successfully (SDK)', csrPreview: csrBase64.substring(0, 60) + '...' } });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -3370,11 +3441,14 @@ export const zatcaController = {
     }
   },
 
-  /** POST /zatca/compliance-check — Submit test invoices for compliance */
+  /** POST /zatca/compliance-check — Submit test invoices using zatca-xml-js SDK */
   async complianceCheck(req: Request, res: Response) {
     try {
       const settings = await prisma.setting.findMany({
-        where: { key: { in: ['ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET', 'ZATCA_PRIVATE_KEY', 'COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_ADDRESS', 'COMPANY_CITY'] } },
+        where: { key: { in: [
+          'ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET',
+          'ZATCA_PRIVATE_KEY_BODY', 'ZATCA_EGS_INFO',
+        ] } },
       });
       const sm: Record<string, string> = {};
       for (const s of settings) sm[s.key] = s.value;
@@ -3382,61 +3456,87 @@ export const zatcaController = {
       if (!sm['ZATCA_COMPLIANCE_CSID'] || !sm['ZATCA_COMPLIANCE_SECRET']) {
         return res.status(400).json({ success: false, error: 'Compliance CSID not found. Complete Step 2 first.' });
       }
+      if (!sm['ZATCA_PRIVATE_KEY_BODY'] || !sm['ZATCA_EGS_INFO']) {
+        return res.status(400).json({ success: false, error: 'Keys not found. Generate CSR first (Step 1).' });
+      }
 
-      const sellerName = sm['COMPANY_NAME'] || 'Fayha Arabia Company';
-      const sellerVat = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
-      const sellerAddress = sm['COMPANY_ADDRESS'] || 'Riyadh';
-      const sellerCity = sm['COMPANY_CITY'] || 'Riyadh';
-      const privateKey = sm['ZATCA_PRIVATE_KEY'];
       const csid = sm['ZATCA_COMPLIANCE_CSID'];
       const secret = sm['ZATCA_COMPLIANCE_SECRET'];
+      const privateKeyBody = sm['ZATCA_PRIVATE_KEY_BODY'];
+      const egsInfo = JSON.parse(sm['ZATCA_EGS_INFO']);
+
+      // Decode binarySecurityToken to get certificate
+      const certBase64 = Buffer.from(csid, 'base64').toString();
+
+      const ZATCA_URL = process.env.ZATCA_API_URL || 'https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal';
+      const authHeader = 'Basic ' + Buffer.from(csid + ':' + secret).toString('base64');
+      const today = new Date().toISOString().split('T')[0];
 
       const results: any[] = [];
 
-      // Submit simplified test invoice (B2C)
-      const simplifiedUuid = uuidv4();
-      const simplifiedXml = buildUblXml({
-        uuid: simplifiedUuid,
-        invoiceNumber: 'TST-0001',
-        issueDate: new Date().toISOString().split('T')[0],
-        issueTime: '12:00:00',
-        invoiceTypeCode: '388',
-        invoiceSubType: '0200000',
-        sellerName, sellerVat, sellerAddress, sellerCity, sellerCountry: 'SA',
-        buyerName: 'Test Customer', currency: 'SAR',
-        lineItems: [{ name: 'Test Service', quantity: 1, unitPrice: 100, vatRate: 15, vatAmount: 15, lineTotal: 100 }],
-        subtotal: 100, vatTotal: 15, grandTotal: 115,
+      // ── Simplified test invoice (B2C) ──
+      const inv1 = new ZATCASimplifiedTaxInvoice({
+        props: {
+          egs_info: egsInfo,
+          invoice_counter_number: 1,
+          invoice_serial_number: 'TST-0001',
+          issue_date: today,
+          issue_time: '12:00:00',
+          previous_invoice_hash: 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzcxMGM2MWRhYmYwYWE2M2Q2MDVhZjBhNTQyNA==',
+          line_items: [{ id: '1', name: 'Test Service', quantity: 1, tax_exclusive_price: 100, VAT_percent: 0.15, other_taxes: [] }],
+        }
       });
-      const signedSimplified = signInvoiceXml(simplifiedXml, privateKey, csid);
-      const simplifiedHash = createHash('sha256').update(signedSimplified, 'utf-8').digest('base64');
+      const signed1 = inv1.sign(certBase64, privateKeyBody);
+      const uuid1Match = signed1.signed_invoice_string.match(/<cbc:UUID>(.*?)<\/cbc:UUID>/);
+      const uuid1 = uuid1Match ? uuid1Match[1] : egsInfo.uuid;
 
       try {
-        const r1 = await submitComplianceInvoice(signedSimplified, simplifiedHash, simplifiedUuid, csid, secret);
-        results.push({ type: 'simplified', ...r1 });
+        const r1 = await fetch(`${ZATCA_URL}/compliance/invoices`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, 'Accept-Version': 'V2', 'Accept-Language': 'en' },
+          body: JSON.stringify({ invoiceHash: signed1.invoice_hash, uuid: uuid1, invoice: Buffer.from(signed1.signed_invoice_string).toString('base64') }),
+        });
+        const d1: any = await r1.json();
+        if (r1.ok) {
+          results.push({ type: 'simplified', reportingStatus: d1.reportingStatus, clearanceStatus: d1.clearanceStatus, warnings: (d1.validationResults?.warningMessages || []).map((w: any) => w.code) });
+        } else {
+          const errors = (d1.validationResults?.errorMessages || []).map((e: any) => e.code).join(', ');
+          results.push({ type: 'simplified', error: `ZATCA errors: ${errors || d1.message || 'Unknown'}` });
+        }
       } catch (e: any) {
         results.push({ type: 'simplified', error: e.message });
       }
 
-      // Submit standard test invoice (B2B)
-      const standardUuid = uuidv4();
-      const standardXml = buildUblXml({
-        uuid: standardUuid,
-        invoiceNumber: 'TST-0002',
-        issueDate: new Date().toISOString().split('T')[0],
-        issueTime: '12:00:00',
-        invoiceTypeCode: '388',
-        invoiceSubType: '0100000',
-        sellerName, sellerVat, sellerAddress, sellerCity, sellerCountry: 'SA',
-        buyerName: 'Test Business', buyerVat: '300000000000003', currency: 'SAR',
-        lineItems: [{ name: 'Test Service', quantity: 1, unitPrice: 200, vatRate: 15, vatAmount: 30, lineTotal: 200 }],
-        subtotal: 200, vatTotal: 30, grandTotal: 230,
+      // ── Second simplified test invoice ──
+      const egsInfo2 = { ...egsInfo, uuid: uuidv4() };
+      const inv2 = new ZATCASimplifiedTaxInvoice({
+        props: {
+          egs_info: egsInfo2,
+          invoice_counter_number: 2,
+          invoice_serial_number: 'TST-0002',
+          issue_date: today,
+          issue_time: '12:00:00',
+          previous_invoice_hash: signed1.invoice_hash,
+          line_items: [{ id: '1', name: 'Test Service', quantity: 1, tax_exclusive_price: 200, VAT_percent: 0.15, other_taxes: [] }],
+        }
       });
-      const signedStandard = signInvoiceXml(standardXml, privateKey, csid);
-      const standardHash = createHash('sha256').update(signedStandard, 'utf-8').digest('base64');
+      const signed2 = inv2.sign(certBase64, privateKeyBody);
+      const uuid2Match = signed2.signed_invoice_string.match(/<cbc:UUID>(.*?)<\/cbc:UUID>/);
+      const uuid2 = uuid2Match ? uuid2Match[1] : egsInfo2.uuid;
 
       try {
-        const r2 = await submitComplianceInvoice(signedStandard, standardHash, standardUuid, csid, secret);
-        results.push({ type: 'standard', ...r2 });
+        const r2 = await fetch(`${ZATCA_URL}/compliance/invoices`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, 'Accept-Version': 'V2', 'Accept-Language': 'en' },
+          body: JSON.stringify({ invoiceHash: signed2.invoice_hash, uuid: uuid2, invoice: Buffer.from(signed2.signed_invoice_string).toString('base64') }),
+        });
+        const d2: any = await r2.json();
+        if (r2.ok) {
+          results.push({ type: 'standard', reportingStatus: d2.reportingStatus, clearanceStatus: d2.clearanceStatus, warnings: (d2.validationResults?.warningMessages || []).map((w: any) => w.code) });
+        } else {
+          const errors = (d2.validationResults?.errorMessages || []).map((e: any) => e.code).join(', ');
+          results.push({ type: 'standard', error: `ZATCA errors: ${errors || d2.message || 'Unknown'}` });
+        }
       } catch (e: any) {
         results.push({ type: 'standard', error: e.message });
       }

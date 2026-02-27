@@ -485,23 +485,39 @@ export async function clearInvoice(
 }
 
 // ==========================================
-// UBL 2.1 XML Invoice Builder (Minimal)
+// UBL 2.1 XML Invoice Builder (ZATCA Compliant)
 // ==========================================
 
-interface InvoiceXmlData {
+export interface InvoiceXmlData {
   uuid: string;
   invoiceNumber: string;
+  icv: number; // Invoice Counter Value (sequential)
   issueDate: string;
   issueTime: string;
   invoiceTypeCode: string; // "388" = standard, "381" = credit, "383" = debit
   invoiceSubType: string;  // "0100000" = standard, "0200000" = simplified
+  // Seller
   sellerName: string;
   sellerVat: string;
-  sellerAddress: string;
+  sellerCrNumber: string;
+  sellerStreet: string;
+  sellerBuildingNumber: string;
+  sellerPostalCode: string;
   sellerCity: string;
+  sellerDistrict: string;
   sellerCountry: string;
+  // Buyer
   buyerName: string;
   buyerVat?: string;
+  buyerStreet?: string;
+  buyerBuildingNumber?: string;
+  buyerPostalCode?: string;
+  buyerCity?: string;
+  buyerDistrict?: string;
+  buyerCountry?: string;
+  // Delivery
+  deliveryDate?: string;
+  // Amounts
   currency: string;
   lineItems: Array<{
     name: string;
@@ -518,9 +534,12 @@ interface InvoiceXmlData {
 }
 
 /**
- * Build a minimal UBL 2.1 XML invoice for ZATCA.
+ * Build a ZATCA-compliant UBL 2.1 XML invoice (unsigned, no QR, no UBLExtensions).
+ * This "pure" XML is what gets hashed for the invoiceHash.
  */
 export function buildUblXml(data: InvoiceXmlData): string {
+  const isSimplified = data.invoiceSubType.startsWith('02');
+
   const lines = data.lineItems.map((item, i) => `
     <cac:InvoiceLine>
       <cbc:ID>${i + 1}</cbc:ID>
@@ -543,6 +562,28 @@ export function buildUblXml(data: InvoiceXmlData): string {
       </cac:Price>
     </cac:InvoiceLine>`).join('\n');
 
+  // Buyer address block
+  const buyerAddress = data.buyerCountry === 'SA' && data.buyerStreet ? `
+      <cac:PostalAddress>
+        <cbc:StreetName>${escapeXml(data.buyerStreet || 'N/A')}</cbc:StreetName>
+        <cbc:BuildingNumber>${escapeXml(data.buyerBuildingNumber || '0000')}</cbc:BuildingNumber>
+        <cbc:CitySubdivisionName>${escapeXml(data.buyerDistrict || 'N/A')}</cbc:CitySubdivisionName>
+        <cbc:CityName>${escapeXml(data.buyerCity || 'Riyadh')}</cbc:CityName>
+        <cbc:PostalZone>${escapeXml(data.buyerPostalCode || '00000')}</cbc:PostalZone>
+        <cac:Country><cbc:IdentificationCode>${data.buyerCountry || 'SA'}</cbc:IdentificationCode></cac:Country>
+      </cac:PostalAddress>` : `
+      <cac:PostalAddress>
+        <cbc:StreetName>${escapeXml(data.buyerStreet || 'N/A')}</cbc:StreetName>
+        <cbc:CityName>${escapeXml(data.buyerCity || 'Riyadh')}</cbc:CityName>
+        <cac:Country><cbc:IdentificationCode>${data.buyerCountry || 'SA'}</cbc:IdentificationCode></cac:Country>
+      </cac:PostalAddress>`;
+
+  // Delivery date block (required for standard B2B invoices)
+  const deliveryBlock = data.deliveryDate ? `
+  <cac:Delivery>
+    <cbc:ActualDeliveryDate>${data.deliveryDate}</cbc:ActualDeliveryDate>
+  </cac:Delivery>` : '';
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -558,7 +599,7 @@ export function buildUblXml(data: InvoiceXmlData): string {
   <cbc:TaxCurrencyCode>${data.currency}</cbc:TaxCurrencyCode>
   <cac:AdditionalDocumentReference>
     <cbc:ID>ICV</cbc:ID>
-    <cbc:UUID>${data.invoiceNumber.replace(/\D/g, '') || '1'}</cbc:UUID>
+    <cbc:UUID>${data.icv}</cbc:UUID>
   </cac:AdditionalDocumentReference>
   <cac:AdditionalDocumentReference>
     <cbc:ID>PIH</cbc:ID>
@@ -568,10 +609,13 @@ export function buildUblXml(data: InvoiceXmlData): string {
   </cac:AdditionalDocumentReference>
   <cac:AccountingSupplierParty>
     <cac:Party>
-      <cac:PartyIdentification><cbc:ID schemeID="CRN">${escapeXml(data.sellerVat)}</cbc:ID></cac:PartyIdentification>
+      <cac:PartyIdentification><cbc:ID schemeID="CRN">${escapeXml(data.sellerCrNumber)}</cbc:ID></cac:PartyIdentification>
       <cac:PostalAddress>
-        <cbc:StreetName>${escapeXml(data.sellerAddress)}</cbc:StreetName>
+        <cbc:StreetName>${escapeXml(data.sellerStreet)}</cbc:StreetName>
+        <cbc:BuildingNumber>${escapeXml(data.sellerBuildingNumber)}</cbc:BuildingNumber>
+        <cbc:CitySubdivisionName>${escapeXml(data.sellerDistrict)}</cbc:CitySubdivisionName>
         <cbc:CityName>${escapeXml(data.sellerCity)}</cbc:CityName>
+        <cbc:PostalZone>${escapeXml(data.sellerPostalCode)}</cbc:PostalZone>
         <cac:Country><cbc:IdentificationCode>${data.sellerCountry}</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>
       <cac:PartyTaxScheme>
@@ -582,19 +626,14 @@ export function buildUblXml(data: InvoiceXmlData): string {
     </cac:Party>
   </cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
-    <cac:Party>
-      <cac:PostalAddress>
-        <cbc:StreetName>N/A</cbc:StreetName>
-        <cbc:CityName>Riyadh</cbc:CityName>
-        <cac:Country><cbc:IdentificationCode>SA</cbc:IdentificationCode></cac:Country>
-      </cac:PostalAddress>
+    <cac:Party>${buyerAddress}
       <cac:PartyTaxScheme>
         <cbc:CompanyID>${escapeXml(data.buyerVat || '')}</cbc:CompanyID>
         <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
       </cac:PartyTaxScheme>
       <cac:PartyLegalEntity><cbc:RegistrationName>${escapeXml(data.buyerName)}</cbc:RegistrationName></cac:PartyLegalEntity>
     </cac:Party>
-  </cac:AccountingCustomerParty>
+  </cac:AccountingCustomerParty>${deliveryBlock}
   <cac:PaymentMeans>
     <cbc:PaymentMeansCode>10</cbc:PaymentMeansCode>
   </cac:PaymentMeans>
@@ -628,19 +667,130 @@ function escapeXml(s: string): string {
 }
 
 /**
- * Sign an XML invoice using the private key and certificate.
- * For sandbox, we compute a hash and create a minimal signature.
+ * Compute the ZATCA-compliant SHA-256 hash of the invoice XML.
+ *
+ * ZATCA takes the signed XML, strips UBLExtensions + cac:Signature + QR reference,
+ * removes the XML declaration, then hashes. We must match this exactly.
+ *
+ * This function accepts either:
+ * - A "signed" XML (with UBLExtensions/Signature/QR) — strips them
+ * - A "pure" XML (without them) — just removes the XML declaration
  */
-export function signInvoiceXml(xml: string, privateKeyPem: string, certificateBase64: string): string {
-  const invoiceHash = createHash('sha256').update(xml, 'utf-8').digest('base64');
+export function computeXmlHash(xml: string): string {
+  let bodyXml = xml;
+  // Remove XML declaration (C14N canonical form excludes this)
+  bodyXml = bodyXml.replace(/<\?xml[^?]*\?>\s*\n?/, '');
+  // Remove UBLExtensions block (if present)
+  bodyXml = bodyXml.replace(/\s*<ext:UBLExtensions>[\s\S]*?<\/ext:UBLExtensions>/m, '');
+  // Remove cac:Signature UBL reference (if present)
+  bodyXml = bodyXml.replace(/\s*<cac:Signature>\s*<cbc:ID>urn:oasis[\s\S]*?<\/cac:Signature>/m, '');
+  // Remove QR AdditionalDocumentReference (if present)
+  bodyXml = bodyXml.replace(/\s*<cac:AdditionalDocumentReference>\s*<cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/m, '');
+  return createHash('sha256').update(bodyXml, 'utf-8').digest('base64');
+}
 
-  // Create digital signature
-  const signer = createSign('SHA256');
-  signer.update(xml);
-  const signatureValue = signer.sign(createPrivateKey(privateKeyPem), 'base64');
+/**
+ * Build Phase 2 TLV QR code for ZATCA (tags 1-8).
+ * Tags 1-5: basic seller info. Tags 6-8: cryptographic stamp for simplified invoices.
+ */
+export function buildPhase2Qr(
+  sellerName: string,
+  vatNumber: string,
+  timestamp: string,
+  totalWithVat: number,
+  vatAmount: number,
+  invoiceHash: string, // base64 SHA-256 of pure XML
+  signatureValue: string, // base64 ECDSA signature
+  publicKeyDer: Buffer, // DER-encoded public key
+): string {
+  const entries: Array<{ tag: number; value: Buffer }> = [
+    { tag: 1, value: Buffer.from(sellerName, 'utf-8') },
+    { tag: 2, value: Buffer.from(vatNumber, 'utf-8') },
+    { tag: 3, value: Buffer.from(timestamp, 'utf-8') },
+    { tag: 4, value: Buffer.from(totalWithVat.toFixed(2), 'utf-8') },
+    { tag: 5, value: Buffer.from(vatAmount.toFixed(2), 'utf-8') },
+    { tag: 6, value: Buffer.from(invoiceHash, 'base64') }, // raw hash bytes
+    { tag: 7, value: Buffer.from(signatureValue, 'base64') }, // raw signature bytes
+    { tag: 8, value: publicKeyDer }, // raw public key DER
+  ];
 
-  // Insert UBL extensions with signature before closing </Invoice>
-  const signedProps = `
+  const parts: Buffer[] = [];
+  for (const entry of entries) {
+    // TLV: tag (1 byte) + length (1 or 2 bytes) + value
+    const len = entry.value.length;
+    if (len < 128) {
+      const tlv = Buffer.alloc(2 + len);
+      tlv[0] = entry.tag;
+      tlv[1] = len;
+      entry.value.copy(tlv, 2);
+      parts.push(tlv);
+    } else {
+      // For lengths >= 128, use 2-byte length encoding
+      const tlv = Buffer.alloc(3 + len);
+      tlv[0] = entry.tag;
+      tlv[1] = (len >> 8) & 0xff;
+      tlv[2] = len & 0xff;
+      entry.value.copy(tlv, 3);
+      parts.push(tlv);
+    }
+  }
+
+  return Buffer.concat(parts).toString('base64');
+}
+
+/**
+ * Extract the public key DER bytes from a base64-encoded X.509 certificate.
+ */
+function extractPublicKeyDer(certBase64: string): Buffer {
+  try {
+    const certDer = Buffer.from(certBase64, 'base64');
+    const certPem = `-----BEGIN CERTIFICATE-----\n${certBase64}\n-----END CERTIFICATE-----`;
+    const { createPublicKey } = require('crypto');
+    const pubKey = createPublicKey(certPem);
+    return pubKey.export({ type: 'spki', format: 'der' });
+  } catch {
+    // Fallback: return empty buffer (QR will have empty tag 8)
+    return Buffer.alloc(0);
+  }
+}
+
+/**
+ * Sign an XML invoice and add UBLExtensions + QR code.
+ *
+ * Process (matches ZATCA SDK zatca-xml-js):
+ * 1. Build signed XML with placeholder hash/signature
+ * 2. Strip UBLExtensions/Signature/QR from signed XML → hash (matches what ZATCA computes)
+ * 3. Re-sign with correct hash and rebuild
+ *
+ * Returns { signedXml, invoiceHash }.
+ */
+export function signInvoiceXml(
+  pureXml: string,
+  _invoiceHash: string, // ignored — we compute it ourselves for accuracy
+  privateKeyPem: string,
+  certificateBase64: string,
+  qrData?: { sellerName: string; vatNumber: string; timestamp: string; totalWithVat: number; vatAmount: number },
+): string {
+  // Helper to build the signed XML given a hash and signature
+  const buildSignedXml = (hash: string, sig: string, qrBase64?: string): string => {
+    let qrRef = '';
+    if (qrBase64) {
+      qrRef = `
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>QR</cbc:ID>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${qrBase64}</cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>`;
+    }
+
+    const sigRef = `
+  <cac:Signature>
+    <cbc:ID>urn:oasis:names:specification:ubl:signature:Invoice</cbc:ID>
+    <cbc:SignatureMethod>urn:oasis:names:specification:ubl:dsig:enveloped:xades</cbc:SignatureMethod>
+  </cac:Signature>`;
+
+    const ublExtensions = `
   <ext:UBLExtensions>
     <ext:UBLExtension>
       <ext:ExtensionContent>
@@ -655,10 +805,10 @@ export function signInvoiceXml(xml: string, privateKeyPem: string, certificateBa
                 <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
                 <ds:Reference Id="invoiceSignedData" URI="">
                   <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-                  <ds:DigestValue>${invoiceHash}</ds:DigestValue>
+                  <ds:DigestValue>${hash}</ds:DigestValue>
                 </ds:Reference>
               </ds:SignedInfo>
-              <ds:SignatureValue>${signatureValue}</ds:SignatureValue>
+              <ds:SignatureValue>${sig}</ds:SignatureValue>
               <ds:KeyInfo>
                 <ds:X509Data>
                   <ds:X509Certificate>${certificateBase64}</ds:X509Certificate>
@@ -671,11 +821,54 @@ export function signInvoiceXml(xml: string, privateKeyPem: string, certificateBa
     </ext:UBLExtension>
   </ext:UBLExtensions>`;
 
-  // Insert extensions after the opening <Invoice ...> tag
-  return xml.replace(
-    /(<Invoice[^>]*>)/,
-    `$1${signedProps}`
-  );
+    let xml = pureXml.replace(
+      /(<Invoice[^>]*>)/,
+      `$1${ublExtensions}`
+    );
+    xml = xml.replace(
+      '<cac:AccountingSupplierParty>',
+      `${qrRef}${sigRef}\n  <cac:AccountingSupplierParty>`
+    );
+    return xml;
+  };
+
+  // Step 1: Build signed XML with placeholder values
+  const placeholderXml = buildSignedXml('PLACEHOLDER_HASH', 'PLACEHOLDER_SIG', qrData ? 'PLACEHOLDER_QR' : undefined);
+
+  // Step 2: Compute the hash from the signed XML (after stripping — same as what ZATCA does)
+  const invoiceHash = computeXmlHash(placeholderXml);
+
+  // Step 3: Create ECDSA signature (sign raw hash bytes per ZATCA SDK)
+  const invoiceHashBytes = Buffer.from(invoiceHash, 'base64');
+  const signer = createSign('SHA256');
+  signer.update(invoiceHashBytes);
+  const signatureValue = signer.sign(createPrivateKey(privateKeyPem), 'base64');
+
+  // Step 4: Build QR if needed (for simplified invoices)
+  let qrBase64: string | undefined;
+  if (qrData) {
+    const publicKeyDer = extractPublicKeyDer(certificateBase64);
+    qrBase64 = buildPhase2Qr(
+      qrData.sellerName, qrData.vatNumber, qrData.timestamp,
+      qrData.totalWithVat, qrData.vatAmount,
+      invoiceHash, signatureValue, publicKeyDer,
+    );
+  }
+
+  // Step 5: Build the final signed XML with real values
+  const signedXml = buildSignedXml(invoiceHash, signatureValue, qrBase64);
+
+  // Store the hash on the function for callers to retrieve
+  (signInvoiceXml as any).__lastHash = invoiceHash;
+
+  return signedXml;
+}
+
+/**
+ * Get the invoice hash from the last signInvoiceXml call.
+ */
+export function getLastInvoiceHash(): string {
+  return (signInvoiceXml as any).__lastHash || '';
 }
 
 // Keep legacy export for backward compatibility during migration
