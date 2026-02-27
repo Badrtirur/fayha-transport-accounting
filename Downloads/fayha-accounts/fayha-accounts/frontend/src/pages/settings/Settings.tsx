@@ -52,11 +52,11 @@ const SETTINGS_KEYS: Record<keyof CompanyProfile, string> = {
 };
 
 const DEFAULT_COMPANY: CompanyProfile = {
-    name: 'Fayha Arabia Logistics',
-    nameAr: 'فيحـــا أرابيـــــا اللوجستية',
-    crNumber: '7016417409',
+    name: 'Fayha Arabia Company',
+    nameAr: 'شركة فيحا أرابيا',
+    crNumber: '1010616141',
     vatNumber: '311467026900003',
-    address: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia',
+    address: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia',
     city: 'Riyadh',
     country: 'Saudi Arabia',
     phone: '050 057 1423',

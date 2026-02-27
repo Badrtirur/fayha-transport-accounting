@@ -7,12 +7,12 @@ import QRCode from 'qrcode';
 import toast from 'react-hot-toast';
 import { buildZatcaTlv } from '../../utils/zatca';
 
-// ─── Fayha Arabia Logistics Logo (real image) ───────────────────────────────
+// ─── Fayha Arabia Company Logo (real image) ───────────────────────────────
 const LOGO_URL = '/fayha-logo.png';
 const FayhaLogo: React.FC<{ size?: number; className?: string; opacity?: number; watermark?: boolean }> = ({ size = 60, className = '', opacity = 1, watermark = false }) => (
   <img
     src={LOGO_URL}
-    alt="Fayha Arabia Logistics"
+    alt="Fayha Arabia Company"
     width={size}
     height={size}
     className={className}
@@ -26,12 +26,12 @@ const FayhaLogo: React.FC<{ size?: number; className?: string; opacity?: number;
 
 // Default company info
 const DEFAULT_COMPANY = {
-  name: 'Fayha Arabia Logistics',
-  nameAr: '\u0641\u064a\u062d\u0640\u0640\u0627 \u0623\u0631\u0627\u0628\u064a\u0640\u0640\u0640\u0640\u0627 \u0627\u0644\u0644\u0648\u062c\u0633\u062a\u064a\u0629',
+  name: 'Fayha Arabia Company',
+  nameAr: '\u0634\u0631\u0643\u0629 \u0641\u064a\u062d\u0627 \u0623\u0631\u0627\u0628\u064a\u0627',
   subtitleAr: '\u0644\u0644\u062a\u062e\u0644\u064a\u0635 \u0627\u0644\u062c\u0645\u0631\u0643\u064a',
   vatNumber: '311467026900003',
-  crNumber: '7016417409',
-  address: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia',
+  crNumber: '1010616141',
+  address: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia',
   addressAr: '\u0631\u0642\u0645 \u0627\u0644\u0645\u0628\u0646\u0649: \u0668\u0662\u0669\u0668\u060c \u0627\u0644\u0623\u0645\u064a\u0631 \u0645\u062d\u0645\u062f \u0628\u0646 \u0639\u0628\u062f\u0627\u0644\u0631\u062d\u0645\u0646 \u0628\u0646 \u0639\u0628\u062f\u0627\u0644\u0639\u0632\u064a\u0632\u060c \u062d\u064a \u0627\u0644\u0645\u0634\u0627\u0639\u0644\u060c \u0627\u0644\u0631\u0645\u0632 \u0627\u0644\u0628\u0631\u064a\u062f\u064a\u060c \u0627\u0644\u0631\u064a\u0627\u0636\u060c \u0627\u0644\u0645\u0645\u0644\u0643\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629 \u0627\u0644\u0633\u0639\u0648\u062f\u064a\u0629',
   city: 'Riyadh',
   country: 'Saudi Arabia',
@@ -270,7 +270,7 @@ const SalesInvoicePreview: React.FC = () => {
                   {companyInfo.nameAr}
                 </p>
                 <p className="text-[17px] font-extrabold tracking-wide" style={{ color: BRAND_BLUE }}>
-                  Fayha Arabia Logistics
+                  Fayha Arabia Company
                 </p>
               </div>
             </div>

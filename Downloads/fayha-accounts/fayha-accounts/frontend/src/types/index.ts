@@ -17,7 +17,7 @@ export type EntryType = 'Payment' | 'Receipt' | 'Contra' | 'Journal';
 export type PaymentMethodType = 'Cash' | 'Bank';
 export type TransactionMethod = 'Credit' | 'Debit';
 export type InvoiceCategory = 'Branch Invoice' | 'Freight Forwarder Invoice' | 'Customs Clearance Invoice';
-export type ZatcaStatus = 'Due' | 'Pending Synchronization' | 'Synced With Zatca';
+export type ZatcaStatus = 'Due' | 'Pending Synchronization' | 'Synced With Zatca' | 'Rejected';
 
 // Legacy types (kept for backward compatibility with existing pages)
 export type JobStatus = 'Draft' | 'Active' | 'Customs Cleared' | 'Delivered' | 'Invoiced' | 'Closed';

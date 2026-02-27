@@ -8,10 +8,10 @@ import QRCode from 'qrcode';
 import { buildZatcaTlv } from '../../utils/zatca';
 
 const DEFAULT_COMPANY = {
-    name: 'Fayha Arabia Logistics',
-    crNumber: '7016417409',
+    name: 'Fayha Arabia Company',
+    crNumber: '1010616141',
     vatNumber: '311467026900003',
-    address: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia',
+    address: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia',
     city: 'Riyadh',
     country: 'Saudi Arabia',
     phone: '050 057 1423',

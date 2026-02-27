@@ -1349,13 +1349,17 @@ async function main() {
   // ==================== SETTINGS ====================
   await prisma.setting.createMany({
     data: [
-      { key: 'COMPANY_NAME', value: 'Fayha Arabia Logistics', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_NAME_AR', value: 'فيحـــا أرابيـــــا اللوجستية', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_CR_NUMBER', value: '7016417409', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_NAME', value: 'Fayha Arabia Company', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_NAME_AR', value: 'شركة فيحا أرابيا', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_CR_NUMBER', value: '1010616141', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_VAT_NUMBER', value: '311467026900003', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_ADDRESS', value: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_ADDRESS', value: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_CITY', value: 'Riyadh', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_COUNTRY', value: 'Saudi Arabia', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_DISTRICT', value: 'Al Mishael Dist.', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_STREET', value: 'Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_BUILDING_NO', value: '8298', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_POSTAL_CODE', value: '14325', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_COUNTRY', value: 'SA', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_PHONE', value: '050 057 1423', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_EMAIL', value: 'info@fayha.sa', type: 'STRING', category: 'COMPANY' },
       { key: 'VAT_RATE', value: '0.15', type: 'NUMBER', category: 'TAX' },

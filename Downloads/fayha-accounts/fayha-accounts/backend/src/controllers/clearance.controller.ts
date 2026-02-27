@@ -421,7 +421,7 @@ export const salesInvoiceController = {
           vatAmount: data.vatAmount || 0,
         },
         {
-          sellerName: settingsMap['COMPANY_NAME'] || 'Fayha Arabia Logistics',
+          sellerName: settingsMap['COMPANY_NAME'] || 'Fayha Arabia Company',
           vatNumber: settingsMap['COMPANY_VAT_NUMBER'] || '311467026900003',
         },
       );
@@ -977,7 +977,7 @@ export const salesInvoiceController = {
         issueTime: issueDate.toISOString().split('T')[1]?.substring(0, 8) || '00:00:00',
         invoiceTypeCode: '388',
         invoiceSubType: '0200000', // simplified by default
-        sellerName: sm['COMPANY_NAME'] || 'Fayha Arabia Logistics',
+        sellerName: sm['COMPANY_NAME'] || 'Fayha Arabia Company',
         sellerVat: sm['COMPANY_VAT_NUMBER'] || '311467026900003',
         sellerAddress: sm['COMPANY_ADDRESS'] || '',
         sellerCity: sm['COMPANY_CITY'] || 'Riyadh',
@@ -3318,19 +3318,19 @@ export const zatcaController = {
       const sm: Record<string, string> = {};
       for (const s of companySettings) sm[s.key] = s.value;
 
-      const companyName = sm['COMPANY_NAME'] || 'Fayha Arabia Logistics';
+      const companyName = sm['COMPANY_NAME'] || 'Fayha Arabia Company';
       const vatNumber = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
       const city = sm['COMPANY_CITY'] || 'Riyadh';
 
       const { privateKey, csrBase64 } = await generateZatcaCsr({
-        commonName: 'TST-886431145-399999999900003',
-        organizationUnit: `${city} Branch`,
+        commonName: 'TST-886431145-311467026900003',
+        organizationUnit: city,
         organization: companyName,
         country: 'SA',
         vatNumber,
         egsSerialNumber: `1-TST|2-TST|3-ed22f1d8-e6a2-1118-9b58-d9a8f11e445f`,
-        location: `${city}, Saudi Arabia`,
-        industry: 'Supply Chain',
+        location: '14325',
+        industry: 'Transportation',
         invoiceType: '1100',
         production: false,
       });
@@ -3356,12 +3356,15 @@ export const zatcaController = {
 
       const result = await getComplianceCsid(csrSetting.value, otp);
 
-      // Store compliance CSID + secret
-      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_CSID' }, create: { key: 'ZATCA_COMPLIANCE_CSID', value: result.binarySecurityToken, type: 'STRING', category: 'ZATCA' }, update: { value: result.binarySecurityToken } });
-      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_SECRET' }, create: { key: 'ZATCA_COMPLIANCE_SECRET', value: result.secret, type: 'STRING', category: 'ZATCA' }, update: { value: result.secret } });
-      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_REQUEST_ID' }, create: { key: 'ZATCA_COMPLIANCE_REQUEST_ID', value: result.requestId, type: 'STRING', category: 'ZATCA' }, update: { value: result.requestId } });
+      // Store compliance CSID + secret (ensure all values are strings for Prisma)
+      const csidVal = String(result.binarySecurityToken || '');
+      const secretVal = String(result.secret || '');
+      const requestIdVal = String(result.requestId || '');
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_CSID' }, create: { key: 'ZATCA_COMPLIANCE_CSID', value: csidVal, type: 'STRING', category: 'ZATCA' }, update: { value: csidVal } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_SECRET' }, create: { key: 'ZATCA_COMPLIANCE_SECRET', value: secretVal, type: 'STRING', category: 'ZATCA' }, update: { value: secretVal } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_REQUEST_ID' }, create: { key: 'ZATCA_COMPLIANCE_REQUEST_ID', value: requestIdVal, type: 'STRING', category: 'ZATCA' }, update: { value: requestIdVal } });
 
-      res.json({ success: true, data: { message: 'Compliance CSID obtained successfully', requestId: result.requestId } });
+      res.json({ success: true, data: { message: 'Compliance CSID obtained successfully', requestId: requestIdVal } });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -3380,7 +3383,7 @@ export const zatcaController = {
         return res.status(400).json({ success: false, error: 'Compliance CSID not found. Complete Step 2 first.' });
       }
 
-      const sellerName = sm['COMPANY_NAME'] || 'Fayha Arabia Logistics';
+      const sellerName = sm['COMPANY_NAME'] || 'Fayha Arabia Company';
       const sellerVat = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
       const sellerAddress = sm['COMPANY_ADDRESS'] || 'Riyadh';
       const sellerCity = sm['COMPANY_CITY'] || 'Riyadh';
@@ -3468,8 +3471,10 @@ export const zatcaController = {
         sm['ZATCA_COMPLIANCE_REQUEST_ID'],
       );
 
-      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_CSID' }, create: { key: 'ZATCA_PRODUCTION_CSID', value: result.binarySecurityToken, type: 'STRING', category: 'ZATCA' }, update: { value: result.binarySecurityToken } });
-      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_SECRET' }, create: { key: 'ZATCA_PRODUCTION_SECRET', value: result.secret, type: 'STRING', category: 'ZATCA' }, update: { value: result.secret } });
+      const pCsidVal = String(result.binarySecurityToken || '');
+      const pSecretVal = String(result.secret || '');
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_CSID' }, create: { key: 'ZATCA_PRODUCTION_CSID', value: pCsidVal, type: 'STRING', category: 'ZATCA' }, update: { value: pCsidVal } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_SECRET' }, create: { key: 'ZATCA_PRODUCTION_SECRET', value: pSecretVal, type: 'STRING', category: 'ZATCA' }, update: { value: pSecretVal } });
 
       res.json({ success: true, data: { message: 'Production CSID obtained successfully. ZATCA onboarding complete!' } });
     } catch (error: any) {
