@@ -896,8 +896,11 @@ export const salesInvoiceController = {
       });
       if (!invoice) return res.status(404).json({ success: false, error: 'Invoice not found' });
 
-      if (!invoice.zatcaUuid || !invoice.zatcaHash) {
-        return res.status(400).json({ success: false, error: 'Invoice is missing ZATCA fields (UUID/hash). Please recreate the invoice.' });
+      // Auto-generate ZATCA UUID if missing
+      if (!invoice.zatcaUuid) {
+        const newUuid = uuidv4();
+        await prisma.salesInvoice.update({ where: { id: invoice.id }, data: { zatcaUuid: newUuid } });
+        (invoice as any).zatcaUuid = newUuid;
       }
       if (invoice.zatcaStatus === 'Synced With Zatca') {
         return res.status(400).json({ success: false, error: 'Invoice is already synced with ZATCA.' });
@@ -928,8 +931,8 @@ export const salesInvoiceController = {
 
         const result = await simulateZatcaReport({
           invoiceNumber: invoice.invoiceNumber,
-          zatcaUuid: invoice.zatcaUuid,
-          zatcaHash: invoice.zatcaHash,
+          zatcaUuid: invoice.zatcaUuid || '',
+          zatcaHash: invoice.zatcaHash || '',
         });
 
         if (result.success) {
@@ -972,6 +975,21 @@ export const salesInvoiceController = {
       const egsInfo = JSON.parse(sm['ZATCA_EGS_INFO']);
       const privateKeyBody = sm['ZATCA_PRIVATE_KEY_BODY'];
       const certBase64 = Buffer.from(pcsid, 'base64').toString();
+
+      // Extract VAT from production certificate (sandbox certs use test VAT)
+      try {
+        const { X509Certificate } = require('crypto');
+        const pem = '-----BEGIN CERTIFICATE-----\n' + certBase64 + '\n-----END CERTIFICATE-----';
+        const cert = new X509Certificate(pem);
+        const cnMatch = cert.subject.match(/CN=([^\n]+)/);
+        if (cnMatch) {
+          const parts = cnMatch[1].split('-');
+          const certVat = parts[parts.length - 1];
+          if (certVat && certVat.length === 15) {
+            egsInfo.VAT_number = certVat;
+          }
+        }
+      } catch (_certErr) { /* keep egsInfo VAT as-is */ }
 
       const issueDate = new Date(invoice.invoiceDate || invoice.createdAt);
       const items = (invoice as any).items || [];
