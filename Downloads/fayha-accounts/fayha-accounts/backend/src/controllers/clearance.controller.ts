@@ -3320,14 +3320,19 @@ export const zatcaController = {
 
       const companyName = sm['COMPANY_NAME'] || 'Fayha Arabia Logistics';
       const vatNumber = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
+      const city = sm['COMPANY_CITY'] || 'Riyadh';
 
-      const { privateKey, csrBase64 } = generateZatcaCsr({
-        commonName: companyName,
-        organizationUnit: `${sm['COMPANY_CITY'] || 'Riyadh'} Branch`,
+      const { privateKey, csrBase64 } = await generateZatcaCsr({
+        commonName: 'TST-886431145-399999999900003',
+        organizationUnit: `${city} Branch`,
         organization: companyName,
         country: 'SA',
         vatNumber,
-        serialNumber: '1-TST|2-TST|3-ed22f1d8-e6a2-1118-9b58-d9a8f11e445f',
+        egsSerialNumber: `1-TST|2-TST|3-ed22f1d8-e6a2-1118-9b58-d9a8f11e445f`,
+        location: `${city}, Saudi Arabia`,
+        industry: 'Supply Chain',
+        invoiceType: '1100',
+        production: false,
       });
 
       // Store in Settings

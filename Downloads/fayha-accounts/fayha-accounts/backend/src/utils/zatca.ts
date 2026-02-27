@@ -5,8 +5,12 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { createHash, createSign, generateKeyPairSync, createPrivateKey } from 'crypto';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
-const ZATCA_API_URL = process.env.ZATCA_API_URL || 'https://gw-fatoora.zatca.gov.sa/e-invoicing/simulation';
+const ZATCA_API_URL = process.env.ZATCA_API_URL || 'https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal';
 
 // ==========================================
 // Phase 1 — UUID, TLV QR, SHA-256 Hash
@@ -119,58 +123,143 @@ export function generateZatcaFields(
 // Phase 2 — Real ZATCA Sandbox API
 // ==========================================
 
-interface CompanyInfo {
-  commonName: string;        // e.g. "Fayha Arabia Logistics"
-  organizationUnit: string;  // e.g. "Riyadh Branch"
-  organization: string;      // e.g. "Fayha Arabia Logistics"
+export interface ZatcaCsrConfig {
+  commonName: string;        // Taxpayer-provided ID (free text)
+  organizationUnit: string;  // Branch name
+  organization: string;      // Taxpayer name
   country: string;           // "SA"
-  vatNumber: string;         // 15-digit VAT
-  serialNumber: string;      // "1-TST|2-TST|3-..." for sandbox
+  vatNumber: string;         // 15-digit VAT (starts and ends with 3)
+  egsSerialNumber: string;   // Format: 1-SolutionName|2-Model|3-UUID
+  location: string;          // Branch address
+  industry: string;          // Branch industry sector
+  invoiceType: string;       // "1100" = standard+simplified
+  production: boolean;       // false = sandbox (TSTZATCA), true = production (ZATCA)
 }
 
 /**
- * Generate EC secp256k1 keypair and a CSR with ZATCA-required fields.
- * Returns { privateKey (PEM), csr (Base64-DER) }.
+ * Helper: run an OpenSSL command and return stdout.
  */
-export function generateZatcaCsr(companyInfo: CompanyInfo): {
-  privateKey: string;
-  csrBase64: string;
-} {
-  // Generate EC secp256k1 keypair
-  const { privateKey, publicKey } = generateKeyPairSync('ec', {
-    namedCurve: 'secp256k1',
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+function runOpenSSL(args: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const proc = spawn('openssl', args);
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.on('close', (code) => {
+      if (code !== 0 && !stdout.includes('-----BEGIN')) {
+        return reject(new Error(`OpenSSL exited with code ${code}: ${stderr}`));
+      }
+      resolve(stdout);
+    });
+    proc.on('error', (err) => reject(new Error(`OpenSSL not found. Install OpenSSL and add it to PATH. ${err.message}`)));
   });
+}
 
-  // Build a CSR-like structure for ZATCA
-  // ZATCA sandbox accepts a simplified CSR format
-  const csrFields = [
-    `CN=${companyInfo.commonName}`,
-    `OU=${companyInfo.organizationUnit}`,
-    `O=${companyInfo.organization}`,
-    `C=${companyInfo.country}`,
-    `serialNumber=${companyInfo.serialNumber}`,
-    `UID=${companyInfo.vatNumber}`,
-    `title=1100`,                           // Invoice type (standard + simplified)
-    `registeredAddress=Riyadh`,
-    `businessCategory=Supply Chain`,
-  ].join('/');
+/**
+ * Build the OpenSSL CSR config file content per ZATCA specification.
+ * Reference: ZATCA CSR Configuration document + SDK csr_template.
+ */
+function buildCsrConfig(config: ZatcaCsrConfig): string {
+  const templateName = config.production ? 'ZATCA-Code-Signing' : 'TSTZATCA-Code-Signing';
 
-  // Create CSR content with ZATCA-specific OIDs
-  // For sandbox: certificateTemplateName = PREZATCA-Code-Signing
-  const csrContent = Buffer.from(
-    `-----BEGIN CERTIFICATE REQUEST-----\n` +
-    `Subject: ${csrFields}\n` +
-    `CertificateTemplateName: PREZATCA-Code-Signing\n` +
-    `PublicKey: ${publicKey.replace(/-----.*-----/g, '').replace(/\n/g, '')}\n` +
-    `-----END CERTIFICATE REQUEST-----`
-  ).toString('base64');
+  return `# ZATCA CSR Configuration
+[req]
+prompt = no
+utf8 = no
+distinguished_name = req_dn
+req_extensions = v3_req
 
-  return {
-    privateKey,
-    csrBase64: csrContent,
+[ v3_req ]
+1.3.6.1.4.1.311.20.2 = ASN1:UTF8String:${templateName}
+subjectAltName = dirName:dir_sect
+
+[ dir_sect ]
+# EGS Serial number (1-SolutionName|2-Model|3-SerialNumber)
+SN = ${config.egsSerialNumber}
+# VAT Registration number
+UID = ${config.vatNumber}
+# Invoice type (TSCZ)(1=supported, 0=not supported)
+title = ${config.invoiceType}
+# Location (branch address)
+registeredAddress = ${config.location}
+# Industry
+businessCategory = ${config.industry}
+
+[ req_dn ]
+CN = ${config.commonName}
+OU = ${config.organizationUnit}
+O = ${config.organization}
+C = ${config.country}
+`;
+}
+
+/**
+ * Generate EC secp256k1 keypair and a proper ZATCA-compliant CSR using OpenSSL.
+ * Returns { privateKey (PEM), csrPem (PEM string), csrBase64 (base64 of PEM) }.
+ */
+export async function generateZatcaCsr(config: ZatcaCsrConfig): Promise<{
+  privateKey: string;
+  csrPem: string;
+  csrBase64: string;
+}> {
+  const tmpDir = os.tmpdir();
+  const uid = uuidv4();
+  const keyFile = path.join(tmpDir, `zatca_key_${uid}.pem`);
+  const csrConfigFile = path.join(tmpDir, `zatca_csr_${uid}.cnf`);
+
+  const cleanup = () => {
+    try { fs.unlinkSync(keyFile); } catch {}
+    try { fs.unlinkSync(csrConfigFile); } catch {}
   };
+
+  try {
+    // Step 1: Generate EC secp256k1 private key via OpenSSL
+    const keyResult = await runOpenSSL(['ecparam', '-name', 'secp256k1', '-genkey']);
+    if (!keyResult.includes('-----BEGIN EC PRIVATE KEY-----')) {
+      throw new Error('OpenSSL did not generate a valid EC private key');
+    }
+    const privateKey = `-----BEGIN EC PRIVATE KEY-----${keyResult.split('-----BEGIN EC PRIVATE KEY-----')[1]}`.trim();
+
+    // Write private key to temp file
+    fs.writeFileSync(keyFile, privateKey, { mode: 0o600 });
+
+    // Step 2: Write CSR config file
+    const csrConfig = buildCsrConfig(config);
+    fs.writeFileSync(csrConfigFile, csrConfig, { mode: 0o600 });
+
+    // Step 3: Generate CSR using OpenSSL
+    const csrResult = await runOpenSSL([
+      'req', '-new', '-sha256',
+      '-key', keyFile,
+      '-config', csrConfigFile,
+    ]);
+
+    if (!csrResult.includes('-----BEGIN CERTIFICATE REQUEST-----')) {
+      throw new Error('OpenSSL did not generate a valid CSR');
+    }
+
+    const csrPem = `-----BEGIN CERTIFICATE REQUEST-----${csrResult.split('-----BEGIN CERTIFICATE REQUEST-----')[1]}`.trim();
+
+    // ZATCA expects: base64 encoding of the PEM CSR string
+    const csrBase64 = Buffer.from(csrPem).toString('base64');
+
+    cleanup();
+
+    return { privateKey, csrPem, csrBase64 };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+/**
+ * Build ZATCA Basic auth header value.
+ * ZATCA auth = Basic base64(binarySecurityToken:secret)
+ * where binarySecurityToken is the base64-encoded certificate from ZATCA.
+ */
+function zatcaAuthHeader(binarySecurityToken: string, secret: string): string {
+  return `Basic ${Buffer.from(`${binarySecurityToken}:${secret}`).toString('base64')}`;
 }
 
 /**
@@ -229,13 +318,11 @@ export async function submitComplianceInvoice(
   validationResults: any;
   errors?: any[];
 }> {
-  const auth = Buffer.from(`${csid}:${secret}`).toString('base64');
-
   const response = await fetch(`${ZATCA_API_URL}/compliance/invoices`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Basic ${auth}`,
+      'Authorization': zatcaAuthHeader(csid, secret),
       'Accept-Version': 'V2',
       'Accept-Language': 'en',
     },
@@ -276,13 +363,11 @@ export async function getProductionCsid(
   requestId: string;
   errors?: any[];
 }> {
-  const auth = Buffer.from(`${complianceCsid}:${complianceSecret}`).toString('base64');
-
   const response = await fetch(`${ZATCA_API_URL}/production/csids`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Basic ${auth}`,
+      'Authorization': zatcaAuthHeader(complianceCsid, complianceSecret),
       'Accept-Version': 'V2',
     },
     body: JSON.stringify({ compliance_request_id: requestId }),
@@ -319,13 +404,11 @@ export async function reportInvoice(
   validationResults: any;
   errors?: any[];
 }> {
-  const auth = Buffer.from(`${pcsid}:${psecret}`).toString('base64');
-
   const response = await fetch(`${ZATCA_API_URL}/invoices/reporting/single`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Basic ${auth}`,
+      'Authorization': zatcaAuthHeader(pcsid, psecret),
       'Accept-Version': 'V2',
       'Accept-Language': 'en',
       'Clearance-Status': '0',
@@ -368,13 +451,11 @@ export async function clearInvoice(
   validationResults: any;
   errors?: any[];
 }> {
-  const auth = Buffer.from(`${pcsid}:${psecret}`).toString('base64');
-
   const response = await fetch(`${ZATCA_API_URL}/invoices/clearance/single`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Basic ${auth}`,
+      'Authorization': zatcaAuthHeader(pcsid, psecret),
       'Accept-Version': 'V2',
       'Accept-Language': 'en',
       'Clearance-Status': '1',

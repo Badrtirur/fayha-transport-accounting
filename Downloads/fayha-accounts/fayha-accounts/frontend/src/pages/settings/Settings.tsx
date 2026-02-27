@@ -756,7 +756,7 @@ const Settings: React.FC = () => {
                                     <div><span className="text-slate-500">Environment:</span> <span className="font-medium">Sandbox (Simulation)</span></div>
                                     <div><span className="text-slate-500">Current Step:</span> <span className="font-medium">{zatcaStatus?.step || 0} / 4</span></div>
                                     <div><span className="text-slate-500">Onboarded:</span> <span className={`font-medium ${zatcaStatus?.isOnboarded ? 'text-emerald-600' : 'text-amber-600'}`}>{zatcaStatus?.isOnboarded ? 'Yes' : 'No'}</span></div>
-                                    <div><span className="text-slate-500">API URL:</span> <span className="font-medium font-mono text-[10px]">gw-fatoora.zatca.gov.sa/simulation</span></div>
+                                    <div><span className="text-slate-500">API URL:</span> <span className="font-medium font-mono text-[10px]">gw-fatoora.zatca.gov.sa/developer-portal</span></div>
                                 </div>
                             </div>
                         </div>
