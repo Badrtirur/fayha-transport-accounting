@@ -512,6 +512,7 @@ export const settingsApi = {
 
 export const zatcaApi = {
   getStatus: () => apiFetch<any>('/zatca/status'),
+  getLog: () => apiFetch<any>('/zatca/log'),
   generateCsr: () =>
     apiFetch<any>('/zatca/generate-csr', { method: 'POST' }),
   getComplianceCsid: (otp: string) =>

@@ -3,7 +3,7 @@ import {
     Building2, Users, Shield, Globe, Bell, Palette, Database,
     Save, Mail, Phone, MapPin, FileText, Eye, Edit2,
     Plus, Trash2, Crown, Clock, Loader2, CheckCircle2,
-    Landmark, X, Check
+    Landmark, X, Check, ScrollText, Award, RefreshCw
 } from 'lucide-react';
 import { settingsApi, banksApi, zatcaApi } from '../../services/api';
 
@@ -83,12 +83,23 @@ const Settings: React.FC = () => {
     const [zatcaLoading, setZatcaLoading] = useState(false);
     const [zatcaOtp, setZatcaOtp] = useState('123345');
     const [zatcaMessage, setZatcaMessage] = useState('');
+    const [zatcaLog, setZatcaLog] = useState<any>(null);
+    const [zatcaLogLoading, setZatcaLogLoading] = useState(false);
 
     const loadZatcaStatus = async () => {
         try {
             const data = await zatcaApi.getStatus();
             setZatcaStatus(data);
         } catch { setZatcaStatus(null); }
+    };
+
+    const loadZatcaLog = async () => {
+        try {
+            setZatcaLogLoading(true);
+            const data = await zatcaApi.getLog();
+            setZatcaLog(data);
+        } catch { setZatcaLog(null); }
+        finally { setZatcaLogLoading(false); }
     };
 
     const handleZatcaAction = async (action: () => Promise<any>, successMsg: string) => {
@@ -157,6 +168,7 @@ const Settings: React.FC = () => {
         loadSettings();
         loadBanks();
         loadZatcaStatus();
+        loadZatcaLog();
     }, []);
 
     const loadSettings = async () => {
@@ -753,11 +765,118 @@ const Settings: React.FC = () => {
                                     <h4 className="font-semibold text-slate-900 text-sm">Status</h4>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3 text-xs">
-                                    <div><span className="text-slate-500">Environment:</span> <span className="font-medium">Sandbox (Simulation)</span></div>
+                                    <div><span className="text-slate-500">Environment:</span> <span className="font-medium">Sandbox (Developer Portal)</span></div>
                                     <div><span className="text-slate-500">Current Step:</span> <span className="font-medium">{zatcaStatus?.step || 0} / 4</span></div>
                                     <div><span className="text-slate-500">Onboarded:</span> <span className={`font-medium ${zatcaStatus?.isOnboarded ? 'text-emerald-600' : 'text-amber-600'}`}>{zatcaStatus?.isOnboarded ? 'Yes' : 'No'}</span></div>
                                     <div><span className="text-slate-500">API URL:</span> <span className="font-medium font-mono text-[10px]">gw-fatoora.zatca.gov.sa/developer-portal</span></div>
                                 </div>
+                            </div>
+
+                            {/* Production Certificate Details */}
+                            {zatcaLog?.certificate && (
+                                <div className="mt-6 p-5 border border-blue-200 bg-blue-50/30 rounded-xl">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Award className="h-4 w-4 text-blue-600" />
+                                        <h4 className="font-semibold text-slate-900 text-sm">Production Certificate (from ZATCA)</h4>
+                                    </div>
+                                    <div className="space-y-2 text-xs">
+                                        <div className="flex gap-2">
+                                            <span className="text-slate-500 w-24 flex-shrink-0">Subject:</span>
+                                            <span className="font-mono text-slate-700 break-all">{zatcaLog.certificate.subject}</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <span className="text-slate-500 w-24 flex-shrink-0">Issuer:</span>
+                                            <span className="font-mono text-slate-700 break-all">{zatcaLog.certificate.issuer}</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <span className="text-slate-500 w-24 flex-shrink-0">Valid From:</span>
+                                            <span className="font-medium text-slate-700">{zatcaLog.certificate.validFrom}</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <span className="text-slate-500 w-24 flex-shrink-0">Valid To:</span>
+                                            <span className="font-medium text-slate-700">{zatcaLog.certificate.validTo}</span>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <span className="text-slate-500 w-24 flex-shrink-0">Serial No:</span>
+                                            <span className="font-mono text-[10px] text-slate-500 break-all">{zatcaLog.certificate.serialNumber}</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-blue-600 mt-3 italic">This certificate was issued by ZATCA's Certificate Authority (PRZEINVOICESCA4-CA). It cannot be generated locally.</p>
+                                </div>
+                            )}
+
+                            {/* ZATCA Invoice Log */}
+                            <div className="mt-6">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <ScrollText className="h-4 w-4 text-slate-600" />
+                                        <h4 className="font-semibold text-slate-900 text-sm">ZATCA Invoice Log</h4>
+                                        {zatcaLog?.invoices?.length > 0 && (
+                                            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">{zatcaLog.invoices.length}</span>
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={loadZatcaLog}
+                                        disabled={zatcaLogLoading}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all"
+                                    >
+                                        <RefreshCw className={`h-3 w-3 ${zatcaLogLoading ? 'animate-spin' : ''}`} />
+                                        Refresh
+                                    </button>
+                                </div>
+
+                                {zatcaLogLoading ? (
+                                    <div className="flex items-center justify-center py-8">
+                                        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                                    </div>
+                                ) : !zatcaLog?.invoices?.length ? (
+                                    <div className="text-center py-8 border-2 border-dashed border-slate-200 rounded-xl">
+                                        <ScrollText className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                                        <p className="text-sm text-slate-500">No invoices reported to ZATCA yet.</p>
+                                        <p className="text-xs text-slate-400 mt-1">Report invoices from the Sales Invoice page to see them here.</p>
+                                    </div>
+                                ) : (
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="bg-slate-50 border-b border-slate-200">
+                                                    <th className="text-left px-3 py-2.5 font-semibold text-slate-600">Invoice</th>
+                                                    <th className="text-left px-3 py-2.5 font-semibold text-slate-600">Client</th>
+                                                    <th className="text-right px-3 py-2.5 font-semibold text-slate-600">Amount</th>
+                                                    <th className="text-center px-3 py-2.5 font-semibold text-slate-600">ZATCA Status</th>
+                                                    <th className="text-left px-3 py-2.5 font-semibold text-slate-600">Invoice Hash</th>
+                                                    <th className="text-left px-3 py-2.5 font-semibold text-slate-600">Clearance ID</th>
+                                                    <th className="text-left px-3 py-2.5 font-semibold text-slate-600">Cleared At</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {zatcaLog.invoices.map((inv: any, idx: number) => (
+                                                    <tr key={inv.id} className={`border-b border-slate-100 hover:bg-slate-50/50 ${idx % 2 === 0 ? '' : 'bg-slate-50/30'}`}>
+                                                        <td className="px-3 py-2.5 font-semibold text-slate-900">{inv.invoiceNumber}</td>
+                                                        <td className="px-3 py-2.5 text-slate-600 max-w-[120px] truncate">{inv.clientName}</td>
+                                                        <td className="px-3 py-2.5 text-right font-mono text-slate-700">{Number(inv.totalAmount).toLocaleString('en', { minimumFractionDigits: 2 })}</td>
+                                                        <td className="px-3 py-2.5 text-center">
+                                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+                                                                inv.zatcaStatus === 'Synced With Zatca'
+                                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                    : inv.zatcaStatus === 'Rejected'
+                                                                    ? 'bg-red-50 text-red-700 border-red-200'
+                                                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                                            }`}>
+                                                                {inv.zatcaStatus}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500 max-w-[160px] truncate" title={inv.zatcaHash || ''}>{inv.zatcaHash || '-'}</td>
+                                                        <td className="px-3 py-2.5 font-mono text-[10px] text-slate-500">{inv.zatcaClearanceId || '-'}</td>
+                                                        <td className="px-3 py-2.5 text-slate-500">
+                                                            {inv.zatcaClearedAt ? new Date(inv.zatcaClearedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

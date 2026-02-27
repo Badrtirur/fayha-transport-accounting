@@ -3373,6 +3373,62 @@ export const zatcaController = {
     }
   },
 
+  /** GET /zatca/log — Return synced invoices + certificate details for audit */
+  async getLog(req: Request, res: Response) {
+    try {
+      // Get all ZATCA-synced invoices
+      const invoices = await prisma.salesInvoice.findMany({
+        where: { zatcaStatus: { in: ['Synced With Zatca', 'Rejected', 'Pending Synchronization'] } },
+        select: {
+          id: true, invoiceNumber: true, zatcaStatus: true, zatcaUuid: true,
+          zatcaHash: true, zatcaClearanceId: true, zatcaClearedAt: true,
+          totalAmount: true, invoiceDate: true, client: { select: { name: true } },
+        },
+        orderBy: { zatcaClearedAt: 'desc' },
+      });
+
+      // Parse the production certificate
+      let certDetails: any = null;
+      const pcsidSetting = await prisma.setting.findUnique({ where: { key: 'ZATCA_PRODUCTION_CSID' } });
+      if (pcsidSetting) {
+        try {
+          const { X509Certificate } = require('crypto');
+          const certContent = Buffer.from(pcsidSetting.value, 'base64').toString();
+          const pem = '-----BEGIN CERTIFICATE-----\n' + certContent + '\n-----END CERTIFICATE-----';
+          const cert = new X509Certificate(pem);
+          certDetails = {
+            subject: cert.subject.replace(/\n/g, ', '),
+            issuer: cert.issuer.replace(/\n/g, ', '),
+            validFrom: cert.validFrom,
+            validTo: cert.validTo,
+            serialNumber: cert.serialNumber,
+          };
+        } catch (_e) { /* cert parse failed */ }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          invoices: invoices.map((inv: any) => ({
+            id: inv.id,
+            invoiceNumber: inv.invoiceNumber,
+            clientName: inv.client?.name || 'N/A',
+            totalAmount: inv.totalAmount,
+            invoiceDate: inv.invoiceDate,
+            zatcaStatus: inv.zatcaStatus,
+            zatcaUuid: inv.zatcaUuid,
+            zatcaHash: inv.zatcaHash,
+            zatcaClearanceId: inv.zatcaClearanceId,
+            zatcaClearedAt: inv.zatcaClearedAt,
+          })),
+          certificate: certDetails,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
   /** POST /zatca/generate-csr — Generate CSR + keypair using zatca-xml-js SDK */
   async generateCsr(req: Request, res: Response) {
     try {

@@ -196,6 +196,7 @@ router.delete('/payment-entries/:id', authenticate, paymentEntryController.remov
 
 // ==================== ZATCA ONBOARDING ====================
 router.get('/zatca/status', authenticate, zatcaController.getStatus);
+router.get('/zatca/log', authenticate, zatcaController.getLog);
 router.post('/zatca/generate-csr', authenticate, zatcaController.generateCsr);
 router.post('/zatca/compliance-csid', authenticate, zatcaController.getComplianceCsidEndpoint);
 router.post('/zatca/compliance-check', authenticate, zatcaController.complianceCheck);
