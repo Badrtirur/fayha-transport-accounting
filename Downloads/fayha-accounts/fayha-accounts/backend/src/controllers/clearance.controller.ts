@@ -962,25 +962,27 @@ export const salesInvoiceController = {
         data: { zatcaStatus: 'Pending Synchronization' },
       });
 
-      // Also need EGS info and private key body for SDK signing
+      // Load EGS info + keys
       const extraSettings = await prisma.setting.findMany({
-        where: { key: { in: ['ZATCA_EGS_INFO', 'ZATCA_PRIVATE_KEY_BODY'] } },
+        where: { key: { in: ['ZATCA_EGS_INFO', 'ZATCA_PRIVATE_KEY', 'ZATCA_CSR'] } },
       });
       for (const s of extraSettings) sm[s.key] = s.value;
 
-      if (!sm['ZATCA_EGS_INFO'] || !sm['ZATCA_PRIVATE_KEY_BODY']) {
+      if (!sm['ZATCA_EGS_INFO'] || !sm['ZATCA_PRIVATE_KEY']) {
         return res.status(400).json({ success: false, error: 'ZATCA keys not found. Complete ZATCA onboarding in Settings.' });
       }
 
       const egsInfo = JSON.parse(sm['ZATCA_EGS_INFO']);
-      const privateKeyBody = sm['ZATCA_PRIVATE_KEY_BODY'];
-      const certBase64 = Buffer.from(pcsid, 'base64').toString();
+      egsInfo.private_key = sm['ZATCA_PRIVATE_KEY'];
+      egsInfo.csr = sm['ZATCA_CSR'] ? Buffer.from(sm['ZATCA_CSR'], 'base64').toString() : undefined;
+      egsInfo.production_certificate = pcsid;
+      egsInfo.production_api_secret = psecret;
 
-      // Extract VAT from production certificate (sandbox certs use test VAT)
+      // Extract VAT from production certificate (sandbox/simulation certs use test VAT)
       try {
+        const certPem = pcsid.includes('BEGIN CERTIFICATE') ? pcsid : `-----BEGIN CERTIFICATE-----\n${Buffer.from(pcsid, 'base64').toString()}\n-----END CERTIFICATE-----`;
         const { X509Certificate } = require('crypto');
-        const pem = '-----BEGIN CERTIFICATE-----\n' + certBase64 + '\n-----END CERTIFICATE-----';
-        const cert = new X509Certificate(pem);
+        const cert = new X509Certificate(certPem);
         const cnMatch = cert.subject.match(/CN=([^\n]+)/);
         if (cnMatch) {
           const parts = cnMatch[1].split('-');
@@ -1024,8 +1026,9 @@ export const salesInvoiceController = {
       });
       const previousHash = prevInvoice?.zatcaHash || 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzcxMGM2MWRhYmYwYWE2M2Q2MDVhZjBhNTQyNA==';
 
-      // Use SDK to build and sign
+      // Use SDK to build, sign, and report
       const egsInfoForInvoice = { ...egsInfo, uuid: invoice.zatcaUuid };
+      const egs = new EGS(egsInfoForInvoice);
       const inv = new ZATCASimplifiedTaxInvoice({
         props: {
           egs_info: egsInfoForInvoice,
@@ -1037,24 +1040,12 @@ export const salesInvoiceController = {
           line_items: sdkLineItems,
         },
       });
-      const signed = inv.sign(certBase64, privateKeyBody);
-      const uuidMatch = signed.signed_invoice_string.match(/<cbc:UUID>(.*?)<\/cbc:UUID>/);
-      const invoiceUuid = uuidMatch ? uuidMatch[1] : invoice.zatcaUuid;
-      const invoiceBase64 = Buffer.from(signed.signed_invoice_string).toString('base64');
-
-      const ZATCA_URL = process.env.ZATCA_API_URL || 'https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal';
-      const authHeader = 'Basic ' + Buffer.from(pcsid + ':' + psecret).toString('base64');
 
       try {
-        // Report simplified invoice to ZATCA
-        const r = await fetch(`${ZATCA_URL}/invoices/reporting/single`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, 'Accept-Version': 'V2', 'Accept-Language': 'en' },
-          body: JSON.stringify({ invoiceHash: signed.invoice_hash, uuid: invoiceUuid, invoice: invoiceBase64 }),
-        });
-        const result: any = await r.json();
+        const signed = egs.signInvoice(inv, true);
+        const result = await egs.reportInvoice(signed.signed_invoice_string, signed.invoice_hash);
 
-        const isReported = r.ok && (result.reportingStatus === 'REPORTED' || result.clearanceStatus === 'CLEARED');
+        const isReported = result.reportingStatus === 'REPORTED' || result.clearanceStatus === 'CLEARED';
         const updated = await prisma.salesInvoice.update({
           where: { id: req.params.id },
           data: {
@@ -1070,7 +1061,7 @@ export const salesInvoiceController = {
           res.json({ success: true, data: updated, zatcaResult: { reportingStatus: result.reportingStatus, warnings: result.validationResults?.warningMessages?.map((w: any) => w.code) } });
         } else {
           const errors = (result.validationResults?.errorMessages || []).map((e: any) => `${e.code}: ${e.message}`);
-          res.json({ success: false, error: `ZATCA rejected: ${errors.join('; ') || result.message || 'Unknown'}`, data: updated });
+          res.json({ success: false, error: `ZATCA rejected: ${errors.join('; ') || 'Unknown'}`, data: updated });
         }
       } catch (zatcaError: any) {
         const updated = await prisma.salesInvoice.update({
@@ -3361,6 +3352,8 @@ export const zatcaController = {
         success: true,
         data: {
           step,
+          environment: process.env.ZATCA_ENV || 'sandbox',
+          apiUrl: process.env.ZATCA_API_URL || '',
           csrGenerated: !!sm['ZATCA_CSR'],
           complianceCsid: sm['ZATCA_COMPLIANCE_CSID'] ? `${sm['ZATCA_COMPLIANCE_CSID'].substring(0, 20)}...` : null,
           compliancePassed: sm['ZATCA_COMPLIANCE_PASSED'] === 'true',
@@ -3393,8 +3386,12 @@ export const zatcaController = {
       if (pcsidSetting) {
         try {
           const { X509Certificate } = require('crypto');
-          const certContent = Buffer.from(pcsidSetting.value, 'base64').toString();
-          const pem = '-----BEGIN CERTIFICATE-----\n' + certContent + '\n-----END CERTIFICATE-----';
+          // Support both PEM format (from SDK) and raw base64 token (from manual API calls)
+          let pem = pcsidSetting.value;
+          if (!pem.includes('BEGIN CERTIFICATE')) {
+            const certContent = Buffer.from(pem, 'base64').toString();
+            pem = '-----BEGIN CERTIFICATE-----\n' + certContent + '\n-----END CERTIFICATE-----';
+          }
           const cert = new X509Certificate(pem);
           certDetails = {
             subject: cert.subject.replace(/\n/g, ', '),
@@ -3465,7 +3462,8 @@ export const zatcaController = {
       };
 
       const egs = new EGS(egsInfo);
-      await egs.generateNewKeysAndCSR(false, 'FayhaERP');
+      const isProduction = process.env.ZATCA_ENV === 'production';
+      await egs.generateNewKeysAndCSR(isProduction, 'FayhaERP');
       const info = egs.get();
 
       // Extract key body (SDK expects without PEM headers)
@@ -3475,7 +3473,7 @@ export const zatcaController = {
         .replace('-----END EC PRIVATE KEY-----', '')
         .replace(/\n/g, '').trim();
 
-      // Store the full PEM key and CSR
+      // Store the CSR as base64-encoded PEM (matching how the SDK sends it to ZATCA API)
       const csrBase64 = Buffer.from(info.csr || '').toString('base64');
       await prisma.setting.upsert({ where: { key: 'ZATCA_PRIVATE_KEY' }, create: { key: 'ZATCA_PRIVATE_KEY', value: fullKey, type: 'STRING', category: 'ZATCA' }, update: { value: fullKey } });
       await prisma.setting.upsert({ where: { key: 'ZATCA_PRIVATE_KEY_BODY' }, create: { key: 'ZATCA_PRIVATE_KEY_BODY', value: privateKeyBody, type: 'STRING', category: 'ZATCA' }, update: { value: privateKeyBody } });
@@ -3490,26 +3488,42 @@ export const zatcaController = {
     }
   },
 
-  /** POST /zatca/compliance-csid — Submit CSR to ZATCA with OTP */
+  /** POST /zatca/compliance-csid — Submit CSR to ZATCA with OTP using SDK */
   async getComplianceCsidEndpoint(req: Request, res: Response) {
     try {
       const { otp } = req.body;
       if (!otp) return res.status(400).json({ success: false, error: 'OTP is required' });
 
+      // Load EGS info (which includes csr + private_key from step 1)
+      const egsInfoSetting = await prisma.setting.findUnique({ where: { key: 'ZATCA_EGS_INFO' } });
+      const privKeySetting = await prisma.setting.findUnique({ where: { key: 'ZATCA_PRIVATE_KEY' } });
       const csrSetting = await prisma.setting.findUnique({ where: { key: 'ZATCA_CSR' } });
-      if (!csrSetting) return res.status(400).json({ success: false, error: 'CSR not found. Generate CSR first (Step 1).' });
+      if (!egsInfoSetting || !privKeySetting || !csrSetting) {
+        return res.status(400).json({ success: false, error: 'CSR not found. Generate CSR first (Step 1).' });
+      }
 
-      const result = await getComplianceCsid(csrSetting.value, otp);
+      const egsInfo = JSON.parse(egsInfoSetting.value);
+      // Restore private_key and csr on the egsInfo so the SDK can use them
+      egsInfo.private_key = privKeySetting.value;
+      // Decode the stored CSR (base64-encoded PEM) back to PEM string
+      egsInfo.csr = Buffer.from(csrSetting.value, 'base64').toString();
 
-      // Store compliance CSID + secret (ensure all values are strings for Prisma)
-      const csidVal = String(result.binarySecurityToken || '');
-      const secretVal = String(result.secret || '');
-      const requestIdVal = String(result.requestId || '');
-      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_CSID' }, create: { key: 'ZATCA_COMPLIANCE_CSID', value: csidVal, type: 'STRING', category: 'ZATCA' }, update: { value: csidVal } });
-      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_SECRET' }, create: { key: 'ZATCA_COMPLIANCE_SECRET', value: secretVal, type: 'STRING', category: 'ZATCA' }, update: { value: secretVal } });
+      // Use SDK's built-in EGS class
+      const egs = new EGS(egsInfo);
+      const complianceRequestId = await egs.issueComplianceCertificate(otp);
+      const updatedInfo = egs.get();
+
+      // Store compliance certificate + secret
+      const compCert = (updatedInfo as any).compliance_certificate || '';
+      const compSecret = (updatedInfo as any).compliance_api_secret || '';
+      const requestIdVal = String(complianceRequestId || '');
+
+      // Store the raw certificate (PEM format) and secret
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_CSID' }, create: { key: 'ZATCA_COMPLIANCE_CSID', value: compCert, type: 'STRING', category: 'ZATCA' }, update: { value: compCert } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_SECRET' }, create: { key: 'ZATCA_COMPLIANCE_SECRET', value: compSecret, type: 'STRING', category: 'ZATCA' }, update: { value: compSecret } });
       await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_REQUEST_ID' }, create: { key: 'ZATCA_COMPLIANCE_REQUEST_ID', value: requestIdVal, type: 'STRING', category: 'ZATCA' }, update: { value: requestIdVal } });
 
-      res.json({ success: true, data: { message: 'Compliance CSID obtained successfully', requestId: requestIdVal } });
+      res.json({ success: true, data: { message: 'Compliance CSID obtained successfully (SDK)', requestId: requestIdVal } });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -3518,37 +3532,36 @@ export const zatcaController = {
   /** POST /zatca/compliance-check — Submit test invoices using zatca-xml-js SDK */
   async complianceCheck(req: Request, res: Response) {
     try {
-      const settings = await prisma.setting.findMany({
+      const settingsRows = await prisma.setting.findMany({
         where: { key: { in: [
           'ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET',
-          'ZATCA_PRIVATE_KEY_BODY', 'ZATCA_EGS_INFO',
+          'ZATCA_PRIVATE_KEY', 'ZATCA_PRIVATE_KEY_BODY', 'ZATCA_EGS_INFO', 'ZATCA_CSR',
         ] } },
       });
       const sm: Record<string, string> = {};
-      for (const s of settings) sm[s.key] = s.value;
+      for (const s of settingsRows) sm[s.key] = s.value;
 
       if (!sm['ZATCA_COMPLIANCE_CSID'] || !sm['ZATCA_COMPLIANCE_SECRET']) {
         return res.status(400).json({ success: false, error: 'Compliance CSID not found. Complete Step 2 first.' });
       }
-      if (!sm['ZATCA_PRIVATE_KEY_BODY'] || !sm['ZATCA_EGS_INFO']) {
+      if (!sm['ZATCA_PRIVATE_KEY'] || !sm['ZATCA_EGS_INFO']) {
         return res.status(400).json({ success: false, error: 'Keys not found. Generate CSR first (Step 1).' });
       }
 
-      const csid = sm['ZATCA_COMPLIANCE_CSID'];
-      const secret = sm['ZATCA_COMPLIANCE_SECRET'];
-      const privateKeyBody = sm['ZATCA_PRIVATE_KEY_BODY'];
+      // Rebuild EGS with compliance certificate so SDK can check compliance
       const egsInfo = JSON.parse(sm['ZATCA_EGS_INFO']);
+      egsInfo.private_key = sm['ZATCA_PRIVATE_KEY'];
+      egsInfo.csr = sm['ZATCA_CSR'] ? Buffer.from(sm['ZATCA_CSR'], 'base64').toString() : undefined;
+      egsInfo.compliance_certificate = sm['ZATCA_COMPLIANCE_CSID'];
+      egsInfo.compliance_api_secret = sm['ZATCA_COMPLIANCE_SECRET'];
 
-      // Decode binarySecurityToken to get certificate
-      const certBase64 = Buffer.from(csid, 'base64').toString();
-
-      const ZATCA_URL = process.env.ZATCA_API_URL || 'https://gw-fatoora.zatca.gov.sa/e-invoicing/developer-portal';
-      const authHeader = 'Basic ' + Buffer.from(csid + ':' + secret).toString('base64');
+      const egs = new EGS(egsInfo);
       const today = new Date().toISOString().split('T')[0];
-
       const results: any[] = [];
 
-      // ── Simplified test invoice (B2C) ──
+      const defaultPrevHash = 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzcxMGM2MWRhYmYwYWE2M2Q2MDVhZjBhNTQyNA==';
+
+      // ── Simplified test invoice 1 (B2C) ──
       const inv1 = new ZATCASimplifiedTaxInvoice({
         props: {
           egs_info: egsInfo,
@@ -3556,63 +3569,40 @@ export const zatcaController = {
           invoice_serial_number: 'TST-0001',
           issue_date: today,
           issue_time: '12:00:00',
-          previous_invoice_hash: 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzcxMGM2MWRhYmYwYWE2M2Q2MDVhZjBhNTQyNA==',
+          previous_invoice_hash: defaultPrevHash,
           line_items: [{ id: '1', name: 'Test Service', quantity: 1, tax_exclusive_price: 100, VAT_percent: 0.15, other_taxes: [] }],
         }
       });
-      const signed1 = inv1.sign(certBase64, privateKeyBody);
-      const uuid1Match = signed1.signed_invoice_string.match(/<cbc:UUID>(.*?)<\/cbc:UUID>/);
-      const uuid1 = uuid1Match ? uuid1Match[1] : egsInfo.uuid;
 
+      let firstInvoiceHash = defaultPrevHash;
       try {
-        const r1 = await fetch(`${ZATCA_URL}/compliance/invoices`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, 'Accept-Version': 'V2', 'Accept-Language': 'en' },
-          body: JSON.stringify({ invoiceHash: signed1.invoice_hash, uuid: uuid1, invoice: Buffer.from(signed1.signed_invoice_string).toString('base64') }),
-        });
-        const d1: any = await r1.json();
-        if (r1.ok) {
-          results.push({ type: 'simplified', reportingStatus: d1.reportingStatus, clearanceStatus: d1.clearanceStatus, warnings: (d1.validationResults?.warningMessages || []).map((w: any) => w.code) });
-        } else {
-          const errors = (d1.validationResults?.errorMessages || []).map((e: any) => e.code).join(', ');
-          results.push({ type: 'simplified', error: `ZATCA errors: ${errors || d1.message || 'Unknown'}` });
-        }
+        const signed1 = egs.signInvoice(inv1, false);
+        firstInvoiceHash = signed1.invoice_hash;
+        const check1 = await egs.checkInvoiceCompliance(signed1.signed_invoice_string, signed1.invoice_hash);
+        results.push({ type: 'simplified', reportingStatus: check1.reportingStatus, clearanceStatus: check1.clearanceStatus });
       } catch (e: any) {
         results.push({ type: 'simplified', error: e.message });
       }
 
-      // ── Second simplified test invoice ──
-      const egsInfo2 = { ...egsInfo, uuid: uuidv4() };
+      // ── Simplified test invoice 2 (same EGS, chained hash) ──
       const inv2 = new ZATCASimplifiedTaxInvoice({
         props: {
-          egs_info: egsInfo2,
+          egs_info: egsInfo,
           invoice_counter_number: 2,
           invoice_serial_number: 'TST-0002',
           issue_date: today,
-          issue_time: '12:00:00',
-          previous_invoice_hash: signed1.invoice_hash,
-          line_items: [{ id: '1', name: 'Test Service', quantity: 1, tax_exclusive_price: 200, VAT_percent: 0.15, other_taxes: [] }],
+          issue_time: '12:01:00',
+          previous_invoice_hash: firstInvoiceHash,
+          line_items: [{ id: '1', name: 'Test Service 2', quantity: 2, tax_exclusive_price: 200, VAT_percent: 0.15, other_taxes: [] }],
         }
       });
-      const signed2 = inv2.sign(certBase64, privateKeyBody);
-      const uuid2Match = signed2.signed_invoice_string.match(/<cbc:UUID>(.*?)<\/cbc:UUID>/);
-      const uuid2 = uuid2Match ? uuid2Match[1] : egsInfo2.uuid;
 
       try {
-        const r2 = await fetch(`${ZATCA_URL}/compliance/invoices`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': authHeader, 'Accept-Version': 'V2', 'Accept-Language': 'en' },
-          body: JSON.stringify({ invoiceHash: signed2.invoice_hash, uuid: uuid2, invoice: Buffer.from(signed2.signed_invoice_string).toString('base64') }),
-        });
-        const d2: any = await r2.json();
-        if (r2.ok) {
-          results.push({ type: 'standard', reportingStatus: d2.reportingStatus, clearanceStatus: d2.clearanceStatus, warnings: (d2.validationResults?.warningMessages || []).map((w: any) => w.code) });
-        } else {
-          const errors = (d2.validationResults?.errorMessages || []).map((e: any) => e.code).join(', ');
-          results.push({ type: 'standard', error: `ZATCA errors: ${errors || d2.message || 'Unknown'}` });
-        }
+        const signed2 = egs.signInvoice(inv2, false);
+        const check2 = await egs.checkInvoiceCompliance(signed2.signed_invoice_string, signed2.invoice_hash);
+        results.push({ type: 'simplified-2', reportingStatus: check2.reportingStatus, clearanceStatus: check2.clearanceStatus });
       } catch (e: any) {
-        results.push({ type: 'standard', error: e.message });
+        results.push({ type: 'simplified-2', error: e.message });
       }
 
       const allPassed = results.every(r => !r.error);
@@ -3626,29 +3616,36 @@ export const zatcaController = {
     }
   },
 
-  /** POST /zatca/production-csid — Exchange compliance CSID for production */
+  /** POST /zatca/production-csid — Exchange compliance CSID for production using SDK */
   async getProductionCsidEndpoint(req: Request, res: Response) {
     try {
-      const settings = await prisma.setting.findMany({
-        where: { key: { in: ['ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET', 'ZATCA_COMPLIANCE_REQUEST_ID', 'ZATCA_COMPLIANCE_PASSED'] } },
+      const settingsRows = await prisma.setting.findMany({
+        where: { key: { in: ['ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET', 'ZATCA_COMPLIANCE_REQUEST_ID', 'ZATCA_COMPLIANCE_PASSED', 'ZATCA_PRIVATE_KEY', 'ZATCA_EGS_INFO', 'ZATCA_CSR'] } },
       });
       const sm: Record<string, string> = {};
-      for (const s of settings) sm[s.key] = s.value;
+      for (const s of settingsRows) sm[s.key] = s.value;
 
       if (sm['ZATCA_COMPLIANCE_PASSED'] !== 'true') {
         return res.status(400).json({ success: false, error: 'Compliance check not passed. Complete Step 3 first.' });
       }
 
-      const result = await getProductionCsid(
-        sm['ZATCA_COMPLIANCE_CSID'],
-        sm['ZATCA_COMPLIANCE_SECRET'],
-        sm['ZATCA_COMPLIANCE_REQUEST_ID'],
-      );
+      // Rebuild EGS with compliance credentials
+      const egsInfo = JSON.parse(sm['ZATCA_EGS_INFO']);
+      egsInfo.private_key = sm['ZATCA_PRIVATE_KEY'];
+      egsInfo.csr = sm['ZATCA_CSR'] ? Buffer.from(sm['ZATCA_CSR'], 'base64').toString() : undefined;
+      egsInfo.compliance_certificate = sm['ZATCA_COMPLIANCE_CSID'];
+      egsInfo.compliance_api_secret = sm['ZATCA_COMPLIANCE_SECRET'];
 
-      const pCsidVal = String(result.binarySecurityToken || '');
-      const pSecretVal = String(result.secret || '');
-      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_CSID' }, create: { key: 'ZATCA_PRODUCTION_CSID', value: pCsidVal, type: 'STRING', category: 'ZATCA' }, update: { value: pCsidVal } });
-      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_SECRET' }, create: { key: 'ZATCA_PRODUCTION_SECRET', value: pSecretVal, type: 'STRING', category: 'ZATCA' }, update: { value: pSecretVal } });
+      const egs = new EGS(egsInfo);
+      const productionRequestId = await egs.issueProductionCertificate(sm['ZATCA_COMPLIANCE_REQUEST_ID']);
+      const updatedInfo = egs.get();
+
+      // Store production certificate + secret
+      const prodCert = (updatedInfo as any).production_certificate || '';
+      const prodSecret = (updatedInfo as any).production_api_secret || '';
+
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_CSID' }, create: { key: 'ZATCA_PRODUCTION_CSID', value: prodCert, type: 'STRING', category: 'ZATCA' }, update: { value: prodCert } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_SECRET' }, create: { key: 'ZATCA_PRODUCTION_SECRET', value: prodSecret, type: 'STRING', category: 'ZATCA' }, update: { value: prodSecret } });
 
       res.json({ success: true, data: { message: 'Production CSID obtained successfully. ZATCA onboarding complete!' } });
     } catch (error: any) {

@@ -765,10 +765,10 @@ const Settings: React.FC = () => {
                                     <h4 className="font-semibold text-slate-900 text-sm">Status</h4>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3 text-xs">
-                                    <div><span className="text-slate-500">Environment:</span> <span className="font-medium">Sandbox (Developer Portal)</span></div>
+                                    <div><span className="text-slate-500">Environment:</span> <span className={`font-medium ${zatcaStatus?.environment === 'production' ? 'text-red-600' : zatcaStatus?.environment === 'simulation' ? 'text-blue-600' : 'text-amber-600'}`}>{zatcaStatus?.environment === 'production' ? 'Production' : zatcaStatus?.environment === 'simulation' ? 'Simulation' : 'Sandbox'}</span></div>
                                     <div><span className="text-slate-500">Current Step:</span> <span className="font-medium">{zatcaStatus?.step || 0} / 4</span></div>
                                     <div><span className="text-slate-500">Onboarded:</span> <span className={`font-medium ${zatcaStatus?.isOnboarded ? 'text-emerald-600' : 'text-amber-600'}`}>{zatcaStatus?.isOnboarded ? 'Yes' : 'No'}</span></div>
-                                    <div><span className="text-slate-500">API URL:</span> <span className="font-medium font-mono text-[10px]">gw-fatoora.zatca.gov.sa/developer-portal</span></div>
+                                    <div><span className="text-slate-500">API URL:</span> <span className="font-medium font-mono text-[10px]">{zatcaStatus?.apiUrl ? new URL(zatcaStatus.apiUrl).pathname.replace('/e-invoicing/', '') : 'N/A'}</span></div>
                                 </div>
                             </div>
 
