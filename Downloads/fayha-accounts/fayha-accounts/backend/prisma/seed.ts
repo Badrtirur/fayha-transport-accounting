@@ -1349,13 +1349,15 @@ async function main() {
   // ==================== SETTINGS ====================
   await prisma.setting.createMany({
     data: [
-      { key: 'COMPANY_NAME', value: 'Fayha Transportation', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_NAME_AR', value: 'فيحاء للنقليات', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_CR', value: '1010999888', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_VAT', value: '300099988800003', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_ADDRESS', value: 'Industrial Area, Riyadh 11564, Saudi Arabia', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_PHONE', value: '+966-11-477-8899', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_EMAIL', value: 'info@fayha-transport.sa', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_NAME', value: 'Fayha Arabia Logistics', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_NAME_AR', value: 'فيحـــا أرابيـــــا اللوجستية', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_CR_NUMBER', value: '7016417409', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_VAT_NUMBER', value: '311467026900003', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_ADDRESS', value: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_CITY', value: 'Riyadh', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_COUNTRY', value: 'Saudi Arabia', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_PHONE', value: '050 057 1423', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_EMAIL', value: 'info@fayha.sa', type: 'STRING', category: 'COMPANY' },
       { key: 'VAT_RATE', value: '0.15', type: 'NUMBER', category: 'TAX' },
       { key: 'DEFAULT_CURRENCY', value: 'SAR', type: 'STRING', category: 'ACCOUNTING' },
       { key: 'FISCAL_YEAR_START', value: '01-01', type: 'STRING', category: 'ACCOUNTING' },

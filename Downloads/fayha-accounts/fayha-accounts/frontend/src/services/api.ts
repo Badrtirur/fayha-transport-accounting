@@ -508,6 +508,23 @@ export const settingsApi = {
     }),
 };
 
+// ==================== ZATCA ONBOARDING ====================
+
+export const zatcaApi = {
+  getStatus: () => apiFetch<any>('/zatca/status'),
+  generateCsr: () =>
+    apiFetch<any>('/zatca/generate-csr', { method: 'POST' }),
+  getComplianceCsid: (otp: string) =>
+    apiFetch<any>('/zatca/compliance-csid', {
+      method: 'POST',
+      body: JSON.stringify({ otp }),
+    }),
+  complianceCheck: () =>
+    apiFetch<any>('/zatca/compliance-check', { method: 'POST' }),
+  getProductionCsid: () =>
+    apiFetch<any>('/zatca/production-csid', { method: 'POST' }),
+};
+
 // ==================== AUTH ====================
 
 export const authApi = {

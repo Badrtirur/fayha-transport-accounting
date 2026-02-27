@@ -42,6 +42,7 @@ import {
   rcvPvcController,
   clientServiceController,
   customerImportController,
+  zatcaController,
 } from '../controllers/clearance.controller';
 import { transactionController } from '../controllers/transaction.controller';
 import { documentController } from '../controllers/document.controller';
@@ -192,6 +193,13 @@ router.get('/payment-entries', authenticate, paymentEntryController.getAll);
 router.get('/payment-entries/:id', authenticate, paymentEntryController.getById);
 router.post('/payment-entries', authenticate, paymentEntryController.create);
 router.delete('/payment-entries/:id', authenticate, paymentEntryController.remove);
+
+// ==================== ZATCA ONBOARDING ====================
+router.get('/zatca/status', authenticate, zatcaController.getStatus);
+router.post('/zatca/generate-csr', authenticate, zatcaController.generateCsr);
+router.post('/zatca/compliance-csid', authenticate, zatcaController.getComplianceCsidEndpoint);
+router.post('/zatca/compliance-check', authenticate, zatcaController.complianceCheck);
+router.post('/zatca/production-csid', authenticate, zatcaController.getProductionCsidEndpoint);
 
 // ==================== SETTINGS ====================
 router.get('/settings', authenticate, settingsController.getAll);

@@ -5,7 +5,7 @@ import {
     Plus, Trash2, Crown, Clock, Loader2, CheckCircle2,
     Landmark, X, Check
 } from 'lucide-react';
-import { settingsApi, banksApi } from '../../services/api';
+import { settingsApi, banksApi, zatcaApi } from '../../services/api';
 
 interface CompanyProfile {
     name: string;
@@ -52,14 +52,14 @@ const SETTINGS_KEYS: Record<keyof CompanyProfile, string> = {
 };
 
 const DEFAULT_COMPANY: CompanyProfile = {
-    name: 'Fayha Clearance LLC',
-    nameAr: 'شركة فيحاء للتخليص',
-    crNumber: '4030123456',
-    vatNumber: '300012345600003',
-    address: 'Jeddah Islamic Port, District 4',
-    city: 'Jeddah',
+    name: 'Fayha Arabia Logistics',
+    nameAr: 'فيحـــا أرابيـــــا اللوجستية',
+    crNumber: '7016417409',
+    vatNumber: '311467026900003',
+    address: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia',
+    city: 'Riyadh',
     country: 'Saudi Arabia',
-    phone: '+966 12 647 0000',
+    phone: '050 057 1423',
     email: 'info@fayha.sa',
     website: 'www.fayha.sa',
 };
@@ -77,6 +77,33 @@ const Settings: React.FC = () => {
     const [editBankId, setEditBankId] = useState<string | null>(null);
     const [bankForm, setBankForm] = useState({ code: '', bankName: '', bankNameAr: '', accountNumber: '', ibanNumber: '', swiftCode: '', branchName: '', branchCode: '', openingBalance: 0, color: '#003366', isActive: true, isDefault: false });
     const [savingBank, setSavingBank] = useState(false);
+
+    // ZATCA onboarding state
+    const [zatcaStatus, setZatcaStatus] = useState<any>(null);
+    const [zatcaLoading, setZatcaLoading] = useState(false);
+    const [zatcaOtp, setZatcaOtp] = useState('123345');
+    const [zatcaMessage, setZatcaMessage] = useState('');
+
+    const loadZatcaStatus = async () => {
+        try {
+            const data = await zatcaApi.getStatus();
+            setZatcaStatus(data);
+        } catch { setZatcaStatus(null); }
+    };
+
+    const handleZatcaAction = async (action: () => Promise<any>, successMsg: string) => {
+        try {
+            setZatcaLoading(true);
+            setZatcaMessage('');
+            const result = await action();
+            setZatcaMessage(result?.message || successMsg);
+            await loadZatcaStatus();
+        } catch (err: any) {
+            setZatcaMessage(`Error: ${err.message || 'Operation failed'}`);
+        } finally {
+            setZatcaLoading(false);
+        }
+    };
 
     const BANK_COLORS = ['#003366', '#0369a1', '#059669', '#7c3aed', '#dc2626', '#ea580c', '#0891b2', '#4f46e5'];
 
@@ -129,6 +156,7 @@ const Settings: React.FC = () => {
     useEffect(() => {
         loadSettings();
         loadBanks();
+        loadZatcaStatus();
     }, []);
 
     const loadSettings = async () => {
@@ -180,6 +208,7 @@ const Settings: React.FC = () => {
         { key: 'users', label: 'Users & Roles', icon: Users },
         { key: 'preferences', label: 'Preferences', icon: Palette },
         { key: 'integrations', label: 'Integrations', icon: Database },
+        { key: 'zatca', label: 'ZATCA', icon: Shield },
     ];
 
     return (
@@ -594,6 +623,141 @@ const Settings: React.FC = () => {
                                         </div>
                                     );
                                 })}
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'zatca' && (
+                        <div className="card-premium p-6 space-y-6">
+                            <div className="pb-4 border-b border-slate-100">
+                                <h2 className="text-lg font-bold text-slate-900">ZATCA E-Invoicing Onboarding</h2>
+                                <p className="text-sm text-slate-500 mt-0.5">Configure ZATCA Phase 2 sandbox integration. Complete all 4 steps to enable real invoice reporting.</p>
+                            </div>
+
+                            {zatcaMessage && (
+                                <div className={`p-3 rounded-lg text-sm ${zatcaMessage.startsWith('Error') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                                    {zatcaMessage}
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                {/* Step 1: Generate CSR */}
+                                <div className={`p-5 border rounded-xl transition-all ${(zatcaStatus?.step || 0) >= 1 ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold ${(zatcaStatus?.step || 0) >= 1 ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                                {(zatcaStatus?.step || 0) >= 1 ? <Check className="h-4 w-4" /> : '1'}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-semibold text-slate-900 text-sm">Generate CSR</h4>
+                                                <p className="text-xs text-slate-500">Generate Certificate Signing Request and keypair</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => handleZatcaAction(() => zatcaApi.generateCsr(), 'CSR generated successfully')}
+                                            disabled={zatcaLoading}
+                                            className="btn-primary text-xs disabled:opacity-50"
+                                        >
+                                            {zatcaLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Generate CSR'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Step 2: Get Compliance CSID */}
+                                <div className={`p-5 border rounded-xl transition-all ${(zatcaStatus?.step || 0) >= 2 ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold ${(zatcaStatus?.step || 0) >= 2 ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                                {(zatcaStatus?.step || 0) >= 2 ? <Check className="h-4 w-4" /> : '2'}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-semibold text-slate-900 text-sm">Get Compliance CSID</h4>
+                                                <p className="text-xs text-slate-500">Enter OTP from ZATCA portal (use 123345 for sandbox)</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="text"
+                                                value={zatcaOtp}
+                                                onChange={(e) => setZatcaOtp(e.target.value)}
+                                                placeholder="OTP"
+                                                className="input-field w-28 text-xs"
+                                                disabled={(zatcaStatus?.step || 0) < 1}
+                                            />
+                                            <button
+                                                onClick={() => handleZatcaAction(() => zatcaApi.getComplianceCsid(zatcaOtp), 'Compliance CSID obtained')}
+                                                disabled={zatcaLoading || (zatcaStatus?.step || 0) < 1}
+                                                className="btn-primary text-xs disabled:opacity-50"
+                                            >
+                                                {zatcaLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Get CSID'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {zatcaStatus?.complianceCsid && (
+                                        <p className="text-xs text-slate-400 mt-2 font-mono">CSID: {zatcaStatus.complianceCsid}</p>
+                                    )}
+                                </div>
+
+                                {/* Step 3: Compliance Check */}
+                                <div className={`p-5 border rounded-xl transition-all ${(zatcaStatus?.step || 0) >= 3 ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold ${(zatcaStatus?.step || 0) >= 3 ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                                {(zatcaStatus?.step || 0) >= 3 ? <Check className="h-4 w-4" /> : '3'}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-semibold text-slate-900 text-sm">Run Compliance Check</h4>
+                                                <p className="text-xs text-slate-500">Submit test invoices (standard + simplified) for validation</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => handleZatcaAction(() => zatcaApi.complianceCheck(), 'Compliance check passed')}
+                                            disabled={zatcaLoading || (zatcaStatus?.step || 0) < 2}
+                                            className="btn-primary text-xs disabled:opacity-50"
+                                        >
+                                            {zatcaLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Run Check'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Step 4: Get Production CSID */}
+                                <div className={`p-5 border rounded-xl transition-all ${(zatcaStatus?.step || 0) >= 4 ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200'}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-sm font-bold ${(zatcaStatus?.step || 0) >= 4 ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                                                {(zatcaStatus?.step || 0) >= 4 ? <Check className="h-4 w-4" /> : '4'}
+                                            </div>
+                                            <div>
+                                                <h4 className="font-semibold text-slate-900 text-sm">Get Production CSID</h4>
+                                                <p className="text-xs text-slate-500">Exchange compliance CSID for production credentials</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => handleZatcaAction(() => zatcaApi.getProductionCsid(), 'Production CSID obtained - onboarding complete!')}
+                                            disabled={zatcaLoading || (zatcaStatus?.step || 0) < 3}
+                                            className="btn-primary text-xs disabled:opacity-50"
+                                        >
+                                            {zatcaLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Get Production CSID'}
+                                        </button>
+                                    </div>
+                                    {zatcaStatus?.productionCsid && (
+                                        <p className="text-xs text-slate-400 mt-2 font-mono">PCSID: {zatcaStatus.productionCsid}</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Status summary */}
+                            <div className="mt-6 p-4 bg-slate-50 rounded-xl">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Shield className="h-4 w-4 text-slate-600" />
+                                    <h4 className="font-semibold text-slate-900 text-sm">Status</h4>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div><span className="text-slate-500">Environment:</span> <span className="font-medium">Sandbox (Simulation)</span></div>
+                                    <div><span className="text-slate-500">Current Step:</span> <span className="font-medium">{zatcaStatus?.step || 0} / 4</span></div>
+                                    <div><span className="text-slate-500">Onboarded:</span> <span className={`font-medium ${zatcaStatus?.isOnboarded ? 'text-emerald-600' : 'text-amber-600'}`}>{zatcaStatus?.isOnboarded ? 'Yes' : 'No'}</span></div>
+                                    <div><span className="text-slate-500">API URL:</span> <span className="font-medium font-mono text-[10px]">gw-fatoora.zatca.gov.sa/simulation</span></div>
+                                </div>
                             </div>
                         </div>
                     )}

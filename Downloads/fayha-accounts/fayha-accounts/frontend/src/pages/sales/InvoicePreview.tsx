@@ -8,13 +8,13 @@ import QRCode from 'qrcode';
 import { buildZatcaTlv } from '../../utils/zatca';
 
 const DEFAULT_COMPANY = {
-    name: 'Fayha Clearance LLC',
-    crNumber: '4030123456',
-    vatNumber: '300012345600003',
-    address: 'Jeddah Islamic Port, District 4',
-    city: 'Jeddah',
+    name: 'Fayha Arabia Logistics',
+    crNumber: '7016417409',
+    vatNumber: '311467026900003',
+    address: 'Building number: 8298, Prince Mohammed bin Abdulrahman bin Abdulaziz Street, Al Mashael District, Riyadh, Kingdom of Saudi Arabia',
+    city: 'Riyadh',
     country: 'Saudi Arabia',
-    phone: '+966 12 647 0000',
+    phone: '050 057 1423',
     email: 'info@fayha.sa',
 };
 

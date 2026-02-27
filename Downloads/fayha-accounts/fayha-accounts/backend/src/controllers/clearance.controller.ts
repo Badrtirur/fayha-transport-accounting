@@ -6,11 +6,24 @@
 import { Request, Response } from 'express';
 import prisma from '../config/database';
 import { generateNumber } from '../utils/helpers';
-import { generateZatcaFields, simulateZatcaReport } from '../utils/zatca';
+import {
+  generateZatcaFields,
+  simulateZatcaReport,
+  generateZatcaCsr,
+  getComplianceCsid,
+  submitComplianceInvoice,
+  getProductionCsid,
+  reportInvoice,
+  clearInvoice,
+  buildUblXml,
+  signInvoiceXml,
+} from '../utils/zatca';
 import { generateInvoicePdf } from '../utils/pdf-generator';
 import * as XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 
 interface CrudOptions {
   allowedFields?: string[];
@@ -886,35 +899,122 @@ export const salesInvoiceController = {
         return res.status(400).json({ success: false, error: 'Invoice is already synced with ZATCA.' });
       }
 
+      // Check if ZATCA is onboarded (production CSID exists)
+      const zatcaSettings = await prisma.setting.findMany({
+        where: { key: { in: ['ZATCA_PRODUCTION_CSID', 'ZATCA_PRODUCTION_SECRET', 'ZATCA_PRIVATE_KEY', 'COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_ADDRESS', 'COMPANY_CITY'] } },
+      });
+      const sm: Record<string, string> = {};
+      for (const s of zatcaSettings) sm[s.key] = s.value;
+
+      const pcsid = sm['ZATCA_PRODUCTION_CSID'];
+      const psecret = sm['ZATCA_PRODUCTION_SECRET'];
+      const privateKey = sm['ZATCA_PRIVATE_KEY'];
+
+      if (!pcsid || !psecret || !privateKey) {
+        // Fall back to simulation if not onboarded
+        await prisma.salesInvoice.update({
+          where: { id: req.params.id },
+          data: { zatcaStatus: 'Pending Synchronization' },
+        });
+
+        const result = await simulateZatcaReport({
+          invoiceNumber: invoice.invoiceNumber,
+          zatcaUuid: invoice.zatcaUuid,
+          zatcaHash: invoice.zatcaHash,
+        });
+
+        if (result.success) {
+          const updated = await prisma.salesInvoice.update({
+            where: { id: req.params.id },
+            data: {
+              zatcaStatus: 'Synced With Zatca',
+              zatcaClearanceId: result.clearanceId,
+              zatcaClearedAt: result.clearedAt,
+            },
+            include: { client: true, items: true },
+          });
+          return res.json({ success: true, data: updated, simulated: true });
+        } else {
+          const updated = await prisma.salesInvoice.update({
+            where: { id: req.params.id },
+            data: { zatcaStatus: 'Rejected' },
+            include: { client: true, items: true },
+          });
+          return res.json({ success: false, error: result.error, data: updated });
+        }
+      }
+
+      // Real ZATCA API flow
       await prisma.salesInvoice.update({
         where: { id: req.params.id },
         data: { zatcaStatus: 'Pending Synchronization' },
       });
 
-      const result = await simulateZatcaReport({
+      const issueDate = new Date(invoice.invoiceDate || invoice.createdAt);
+      const items = (invoice as any).items || [];
+      const lineItems = items.length > 0
+        ? items.map((item: any) => ({
+            name: item.description || item.serviceName || 'Service',
+            quantity: Number(item.quantity) || 1,
+            unitPrice: Number(item.unitPrice) || Number(item.amount) || 0,
+            vatRate: 15,
+            vatAmount: (Number(item.amount) || 0) * 0.15,
+            lineTotal: Number(item.amount) || 0,
+          }))
+        : [{
+            name: 'Services',
+            quantity: 1,
+            unitPrice: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
+            vatRate: 15,
+            vatAmount: Number(invoice.vatAmount) || 0,
+            lineTotal: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
+          }];
+
+      const xml = buildUblXml({
+        uuid: invoice.zatcaUuid,
         invoiceNumber: invoice.invoiceNumber,
-        zatcaUuid: invoice.zatcaUuid,
-        zatcaHash: invoice.zatcaHash,
+        issueDate: issueDate.toISOString().split('T')[0],
+        issueTime: issueDate.toISOString().split('T')[1]?.substring(0, 8) || '00:00:00',
+        invoiceTypeCode: '388',
+        invoiceSubType: '0200000', // simplified by default
+        sellerName: sm['COMPANY_NAME'] || 'Fayha Arabia Logistics',
+        sellerVat: sm['COMPANY_VAT_NUMBER'] || '311467026900003',
+        sellerAddress: sm['COMPANY_ADDRESS'] || '',
+        sellerCity: sm['COMPANY_CITY'] || 'Riyadh',
+        sellerCountry: 'SA',
+        buyerName: (invoice as any).client?.name || 'Cash Customer',
+        buyerVat: (invoice as any).client?.vatNumber || '',
+        currency: 'SAR',
+        lineItems,
+        subtotal: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
+        vatTotal: Number(invoice.vatAmount) || 0,
+        grandTotal: Number(invoice.totalAmount) || 0,
       });
 
-      if (result.success) {
+      const signedXml = signInvoiceXml(xml, privateKey, pcsid);
+      const invoiceHash = createHash('sha256').update(signedXml, 'utf-8').digest('base64');
+
+      try {
+        // Use reportInvoice for simplified invoices
+        const result = await reportInvoice(signedXml, invoiceHash, invoice.zatcaUuid, pcsid, psecret);
+
         const updated = await prisma.salesInvoice.update({
           where: { id: req.params.id },
           data: {
-            zatcaStatus: 'Synced With Zatca',
-            zatcaClearanceId: result.clearanceId,
-            zatcaClearedAt: result.clearedAt,
+            zatcaStatus: result.reportingStatus === 'REPORTED' || result.reportingStatus === 'CLEARED' ? 'Synced With Zatca' : 'Rejected',
+            zatcaClearanceId: `ZATCA-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}`,
+            zatcaClearedAt: new Date(),
           },
           include: { client: true, items: true },
         });
-        res.json({ success: true, data: updated });
-      } else {
+        res.json({ success: true, data: updated, zatcaResult: result });
+      } catch (zatcaError: any) {
         const updated = await prisma.salesInvoice.update({
           where: { id: req.params.id },
           data: { zatcaStatus: 'Rejected' },
           include: { client: true, items: true },
         });
-        res.json({ success: false, error: result.error, data: updated });
+        res.json({ success: false, error: zatcaError.message, data: updated });
       }
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
@@ -3163,6 +3263,210 @@ export const customerImportController = {
         success: true,
         data: { imported, skipped, errors: errors.slice(0, 50), totalRows: rows.length },
       });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+};
+
+// ==========================================
+// ZATCA Onboarding Controller
+// ==========================================
+
+export const zatcaController = {
+  /** GET /zatca/status — Return current onboarding state */
+  async getStatus(req: Request, res: Response) {
+    try {
+      const keys = [
+        'ZATCA_PRIVATE_KEY', 'ZATCA_CSR',
+        'ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET', 'ZATCA_COMPLIANCE_REQUEST_ID',
+        'ZATCA_COMPLIANCE_PASSED',
+        'ZATCA_PRODUCTION_CSID', 'ZATCA_PRODUCTION_SECRET',
+      ];
+      const settings = await prisma.setting.findMany({ where: { key: { in: keys } } });
+      const sm: Record<string, string> = {};
+      for (const s of settings) sm[s.key] = s.value;
+
+      let step = 0;
+      if (sm['ZATCA_CSR'] && sm['ZATCA_PRIVATE_KEY']) step = 1;
+      if (sm['ZATCA_COMPLIANCE_CSID'] && sm['ZATCA_COMPLIANCE_SECRET']) step = 2;
+      if (sm['ZATCA_COMPLIANCE_PASSED'] === 'true') step = 3;
+      if (sm['ZATCA_PRODUCTION_CSID'] && sm['ZATCA_PRODUCTION_SECRET']) step = 4;
+
+      res.json({
+        success: true,
+        data: {
+          step,
+          csrGenerated: !!sm['ZATCA_CSR'],
+          complianceCsid: sm['ZATCA_COMPLIANCE_CSID'] ? `${sm['ZATCA_COMPLIANCE_CSID'].substring(0, 20)}...` : null,
+          compliancePassed: sm['ZATCA_COMPLIANCE_PASSED'] === 'true',
+          productionCsid: sm['ZATCA_PRODUCTION_CSID'] ? `${sm['ZATCA_PRODUCTION_CSID'].substring(0, 20)}...` : null,
+          isOnboarded: step === 4,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /** POST /zatca/generate-csr — Generate CSR + keypair */
+  async generateCsr(req: Request, res: Response) {
+    try {
+      const companySettings = await prisma.setting.findMany({
+        where: { key: { in: ['COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_CITY'] } },
+      });
+      const sm: Record<string, string> = {};
+      for (const s of companySettings) sm[s.key] = s.value;
+
+      const companyName = sm['COMPANY_NAME'] || 'Fayha Arabia Logistics';
+      const vatNumber = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
+
+      const { privateKey, csrBase64 } = generateZatcaCsr({
+        commonName: companyName,
+        organizationUnit: `${sm['COMPANY_CITY'] || 'Riyadh'} Branch`,
+        organization: companyName,
+        country: 'SA',
+        vatNumber,
+        serialNumber: '1-TST|2-TST|3-ed22f1d8-e6a2-1118-9b58-d9a8f11e445f',
+      });
+
+      // Store in Settings
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRIVATE_KEY' }, create: { key: 'ZATCA_PRIVATE_KEY', value: privateKey, type: 'STRING', category: 'ZATCA' }, update: { value: privateKey } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_CSR' }, create: { key: 'ZATCA_CSR', value: csrBase64, type: 'STRING', category: 'ZATCA' }, update: { value: csrBase64 } });
+
+      res.json({ success: true, data: { message: 'CSR and keypair generated successfully', csrPreview: csrBase64.substring(0, 60) + '...' } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /** POST /zatca/compliance-csid — Submit CSR to ZATCA with OTP */
+  async getComplianceCsidEndpoint(req: Request, res: Response) {
+    try {
+      const { otp } = req.body;
+      if (!otp) return res.status(400).json({ success: false, error: 'OTP is required' });
+
+      const csrSetting = await prisma.setting.findUnique({ where: { key: 'ZATCA_CSR' } });
+      if (!csrSetting) return res.status(400).json({ success: false, error: 'CSR not found. Generate CSR first (Step 1).' });
+
+      const result = await getComplianceCsid(csrSetting.value, otp);
+
+      // Store compliance CSID + secret
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_CSID' }, create: { key: 'ZATCA_COMPLIANCE_CSID', value: result.binarySecurityToken, type: 'STRING', category: 'ZATCA' }, update: { value: result.binarySecurityToken } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_SECRET' }, create: { key: 'ZATCA_COMPLIANCE_SECRET', value: result.secret, type: 'STRING', category: 'ZATCA' }, update: { value: result.secret } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_REQUEST_ID' }, create: { key: 'ZATCA_COMPLIANCE_REQUEST_ID', value: result.requestId, type: 'STRING', category: 'ZATCA' }, update: { value: result.requestId } });
+
+      res.json({ success: true, data: { message: 'Compliance CSID obtained successfully', requestId: result.requestId } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /** POST /zatca/compliance-check — Submit test invoices for compliance */
+  async complianceCheck(req: Request, res: Response) {
+    try {
+      const settings = await prisma.setting.findMany({
+        where: { key: { in: ['ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET', 'ZATCA_PRIVATE_KEY', 'COMPANY_NAME', 'COMPANY_VAT_NUMBER', 'COMPANY_ADDRESS', 'COMPANY_CITY'] } },
+      });
+      const sm: Record<string, string> = {};
+      for (const s of settings) sm[s.key] = s.value;
+
+      if (!sm['ZATCA_COMPLIANCE_CSID'] || !sm['ZATCA_COMPLIANCE_SECRET']) {
+        return res.status(400).json({ success: false, error: 'Compliance CSID not found. Complete Step 2 first.' });
+      }
+
+      const sellerName = sm['COMPANY_NAME'] || 'Fayha Arabia Logistics';
+      const sellerVat = sm['COMPANY_VAT_NUMBER'] || '311467026900003';
+      const sellerAddress = sm['COMPANY_ADDRESS'] || 'Riyadh';
+      const sellerCity = sm['COMPANY_CITY'] || 'Riyadh';
+      const privateKey = sm['ZATCA_PRIVATE_KEY'];
+      const csid = sm['ZATCA_COMPLIANCE_CSID'];
+      const secret = sm['ZATCA_COMPLIANCE_SECRET'];
+
+      const results: any[] = [];
+
+      // Submit simplified test invoice (B2C)
+      const simplifiedUuid = uuidv4();
+      const simplifiedXml = buildUblXml({
+        uuid: simplifiedUuid,
+        invoiceNumber: 'TST-0001',
+        issueDate: new Date().toISOString().split('T')[0],
+        issueTime: '12:00:00',
+        invoiceTypeCode: '388',
+        invoiceSubType: '0200000',
+        sellerName, sellerVat, sellerAddress, sellerCity, sellerCountry: 'SA',
+        buyerName: 'Test Customer', currency: 'SAR',
+        lineItems: [{ name: 'Test Service', quantity: 1, unitPrice: 100, vatRate: 15, vatAmount: 15, lineTotal: 100 }],
+        subtotal: 100, vatTotal: 15, grandTotal: 115,
+      });
+      const signedSimplified = signInvoiceXml(simplifiedXml, privateKey, csid);
+      const simplifiedHash = createHash('sha256').update(signedSimplified, 'utf-8').digest('base64');
+
+      try {
+        const r1 = await submitComplianceInvoice(signedSimplified, simplifiedHash, simplifiedUuid, csid, secret);
+        results.push({ type: 'simplified', ...r1 });
+      } catch (e: any) {
+        results.push({ type: 'simplified', error: e.message });
+      }
+
+      // Submit standard test invoice (B2B)
+      const standardUuid = uuidv4();
+      const standardXml = buildUblXml({
+        uuid: standardUuid,
+        invoiceNumber: 'TST-0002',
+        issueDate: new Date().toISOString().split('T')[0],
+        issueTime: '12:00:00',
+        invoiceTypeCode: '388',
+        invoiceSubType: '0100000',
+        sellerName, sellerVat, sellerAddress, sellerCity, sellerCountry: 'SA',
+        buyerName: 'Test Business', buyerVat: '300000000000003', currency: 'SAR',
+        lineItems: [{ name: 'Test Service', quantity: 1, unitPrice: 200, vatRate: 15, vatAmount: 30, lineTotal: 200 }],
+        subtotal: 200, vatTotal: 30, grandTotal: 230,
+      });
+      const signedStandard = signInvoiceXml(standardXml, privateKey, csid);
+      const standardHash = createHash('sha256').update(signedStandard, 'utf-8').digest('base64');
+
+      try {
+        const r2 = await submitComplianceInvoice(signedStandard, standardHash, standardUuid, csid, secret);
+        results.push({ type: 'standard', ...r2 });
+      } catch (e: any) {
+        results.push({ type: 'standard', error: e.message });
+      }
+
+      const allPassed = results.every(r => !r.error);
+      if (allPassed) {
+        await prisma.setting.upsert({ where: { key: 'ZATCA_COMPLIANCE_PASSED' }, create: { key: 'ZATCA_COMPLIANCE_PASSED', value: 'true', type: 'STRING', category: 'ZATCA' }, update: { value: 'true' } });
+      }
+
+      res.json({ success: true, data: { passed: allPassed, results } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  /** POST /zatca/production-csid — Exchange compliance CSID for production */
+  async getProductionCsidEndpoint(req: Request, res: Response) {
+    try {
+      const settings = await prisma.setting.findMany({
+        where: { key: { in: ['ZATCA_COMPLIANCE_CSID', 'ZATCA_COMPLIANCE_SECRET', 'ZATCA_COMPLIANCE_REQUEST_ID', 'ZATCA_COMPLIANCE_PASSED'] } },
+      });
+      const sm: Record<string, string> = {};
+      for (const s of settings) sm[s.key] = s.value;
+
+      if (sm['ZATCA_COMPLIANCE_PASSED'] !== 'true') {
+        return res.status(400).json({ success: false, error: 'Compliance check not passed. Complete Step 3 first.' });
+      }
+
+      const result = await getProductionCsid(
+        sm['ZATCA_COMPLIANCE_CSID'],
+        sm['ZATCA_COMPLIANCE_SECRET'],
+        sm['ZATCA_COMPLIANCE_REQUEST_ID'],
+      );
+
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_CSID' }, create: { key: 'ZATCA_PRODUCTION_CSID', value: result.binarySecurityToken, type: 'STRING', category: 'ZATCA' }, update: { value: result.binarySecurityToken } });
+      await prisma.setting.upsert({ where: { key: 'ZATCA_PRODUCTION_SECRET' }, create: { key: 'ZATCA_PRODUCTION_SECRET', value: result.secret, type: 'STRING', category: 'ZATCA' }, update: { value: result.secret } });
+
+      res.json({ success: true, data: { message: 'Production CSID obtained successfully. ZATCA onboarding complete!' } });
     } catch (error: any) {
       res.status(500).json({ success: false, error: error.message });
     }
