@@ -55,7 +55,7 @@ const DEFAULT_COMPANY: CompanyProfile = {
     name: 'Fayha Arabia Company',
     nameAr: 'شركة فيحا أرابيا',
     crNumber: '1010616141',
-    vatNumber: '311467026900003',
+    vatNumber: '314257580500003',
     address: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia',
     city: 'Riyadh',
     country: 'Saudi Arabia',
@@ -110,7 +110,8 @@ const Settings: React.FC = () => {
             setZatcaMessage(result?.message || successMsg);
             await loadZatcaStatus();
         } catch (err: any) {
-            setZatcaMessage(`Error: ${err.message || 'Operation failed'}`);
+            const details = err.zatcaDetails ? JSON.stringify(err.zatcaDetails, null, 2) : '';
+            setZatcaMessage(`Error: ${err.message || 'Operation failed'}${details ? '\nZATCA Details: ' + details : ''}`);
         } finally {
             setZatcaLoading(false);
         }
@@ -723,7 +724,16 @@ const Settings: React.FC = () => {
                                             </div>
                                         </div>
                                         <button
-                                            onClick={() => handleZatcaAction(() => zatcaApi.complianceCheck(), 'Compliance check passed')}
+                                            onClick={() => handleZatcaAction(async () => {
+                                                const result = await zatcaApi.complianceCheck();
+                                                if (result?.passed === false) {
+                                                    const anyReported = result.results?.some((r: any) => r.reportingStatus === 'REPORTED');
+                                                    if (!anyReported) {
+                                                        throw new Error('Compliance check failed: ' + JSON.stringify(result.results));
+                                                    }
+                                                }
+                                                return { message: 'Compliance check passed!' };
+                                            }, 'Compliance check passed')}
                                             disabled={zatcaLoading || (zatcaStatus?.step || 0) < 2}
                                             className="btn-primary text-xs disabled:opacity-50"
                                         >

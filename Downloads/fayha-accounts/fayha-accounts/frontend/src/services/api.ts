@@ -120,7 +120,9 @@ async function apiFetch<T = unknown>(
   // Handle non-OK responses
   if (!response.ok) {
     const message = body?.error || body?.message || `Request failed with status ${response.status}`;
-    throw new ApiError(message, response.status, body?.code, body?.details);
+    const err = new ApiError(message, response.status, body?.code, body?.details);
+    (err as any).zatcaDetails = body?.zatcaDetails;
+    throw err;
   }
 
   // Unwrap `{ success: true, data: ... }` envelope
