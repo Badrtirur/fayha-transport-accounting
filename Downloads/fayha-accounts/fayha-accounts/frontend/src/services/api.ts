@@ -175,9 +175,14 @@ async function attemptTokenRefresh(): Promise<boolean> {
 }
 
 /** Clears all auth tokens from localStorage. */
-function clearAuth(): void {
+export function clearAuth(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+/** Check if a token exists in localStorage. */
+export function hasAuthToken(): boolean {
+  return !!localStorage.getItem(TOKEN_KEY);
 }
 
 // ==================== QUERY PARAMS HELPER ====================
@@ -559,40 +564,22 @@ export const authApi = {
     }),
 };
 
-// ==================== AUTO-LOGIN HELPER ====================
+// ==================== AUTH VALIDATION HELPER ====================
 
 /**
- * Ensures the frontend has a valid auth token stored.
- *
- * Since the frontend does not yet have a login page, this function
- * auto-logs in with the default admin credentials when no token is present.
- * Remove this once a proper login flow is implemented.
+ * Validates the existing auth token. Returns true if valid, false otherwise.
+ * Does NOT auto-login - the Login page handles authentication.
  */
-export async function ensureAuth(): Promise<void> {
+export async function ensureAuth(): Promise<boolean> {
   const existingToken = localStorage.getItem(TOKEN_KEY);
-  if (existingToken) {
-    // Validate the token is still good by hitting /auth/me
-    try {
-      await authApi.getProfile();
-      return; // Token is valid
-    } catch {
-      // Token is expired or invalid; clear and re-login below
-      clearAuth();
-    }
-  }
+  if (!existingToken) return false;
 
   try {
-    const result = await authApi.login('admin@fayha-transport.sa', 'admin123');
-    localStorage.setItem(TOKEN_KEY, result.token);
-    if (result.refreshToken) {
-      localStorage.setItem(REFRESH_TOKEN_KEY, result.refreshToken);
-    }
-  } catch (error) {
-    console.error(
-      '[Fayha API] Auto-login failed. Ensure the backend is running at',
-      API_BASE,
-      error,
-    );
+    await authApi.getProfile();
+    return true;
+  } catch {
+    clearAuth();
+    return false;
   }
 }
 

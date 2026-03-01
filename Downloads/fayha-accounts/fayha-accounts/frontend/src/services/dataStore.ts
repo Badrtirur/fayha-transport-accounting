@@ -1,7 +1,7 @@
 import type {
   PaymentEntry, ExpenseEntry, SOAEntry,
 } from '../types';
-import { ensureAuth } from './api';
+// ensureAuth import removed - auth is now handled by Login page
 
 // ===================================================================
 // FAYHA CLEARANCE ERP - Central Data Store
@@ -26,7 +26,7 @@ export const generateDocumentId = (prefix: string): string => {
 // ===================================================================
 
 export const initializeDataStore = async (): Promise<void> => {
-  await ensureAuth();
+  // Auth is now handled by the Login page; this is a no-op kept for compatibility.
 };
 
 // ===================================================================

@@ -1,20 +1,36 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import AppRoutes from './routes';
 import { Toaster } from 'react-hot-toast';
-import { initializeDataStore } from './services/dataStore';
+import { hasAuthToken, ensureAuth } from './services/api';
 
 function App() {
   const [ready, setReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    initializeDataStore()
-      .then(() => setReady(true))
-      .catch((err) => {
-        console.error('[Fayha] Initialization failed:', err);
-        // Still render the app even if auth fails, so the user can see the UI
-        setReady(true);
-      });
+    // Check if there's a valid token on startup
+    if (hasAuthToken()) {
+      ensureAuth()
+        .then((valid) => {
+          setIsAuthenticated(valid);
+          setReady(true);
+        })
+        .catch(() => {
+          setIsAuthenticated(false);
+          setReady(true);
+        });
+    } else {
+      setReady(true);
+    }
+  }, []);
+
+  const handleLogin = useCallback(() => {
+    setIsAuthenticated(true);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    setIsAuthenticated(false);
   }, []);
 
   if (!ready) {
@@ -27,7 +43,11 @@ function App() {
 
   return (
     <BrowserRouter>
-      <AppRoutes />
+      <AppRoutes
+        isAuthenticated={isAuthenticated}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+      />
       <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
     </BrowserRouter>
   );

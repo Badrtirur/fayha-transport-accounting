@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import DashboardLayout from './layouts/DashboardLayout';
 import Dashboard from './pages/Dashboard';
+import Login from './pages/Login';
 
 // Legacy pages (kept for backward compatibility)
 import JobList from './pages/jobs/JobList';
@@ -83,10 +84,26 @@ import DisplayPageComponent from './pages/display/DisplayPage';
 // Routes
 // ===================================================================
 
-const AppRoutes: React.FC = () => {
+interface AppRoutesProps {
+    isAuthenticated: boolean;
+    onLogin: () => void;
+    onLogout: () => void;
+}
+
+const AppRoutes: React.FC<AppRoutesProps> = ({ isAuthenticated, onLogin, onLogout }) => {
+    if (!isAuthenticated) {
+        return (
+            <Routes>
+                <Route path="/login" element={<Login onLogin={onLogin} />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+        );
+    }
+
     return (
         <Routes>
-            <Route path="/" element={<DashboardLayout />}>
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/" element={<DashboardLayout onLogout={onLogout} />}>
                 <Route index element={<Dashboard />} />
 
                 {/* ============ CRM ============ */}

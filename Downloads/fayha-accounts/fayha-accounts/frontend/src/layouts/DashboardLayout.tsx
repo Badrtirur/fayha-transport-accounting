@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard,
     Calculator,
@@ -46,6 +46,7 @@ import {
     BookOpen,
     Wallet
 } from 'lucide-react';
+import { clearAuth } from '../services/api';
 
 interface NavChildItem {
     name: string;
@@ -61,7 +62,12 @@ interface NavItem {
     children?: NavChildItem[];
 }
 
-const DashboardLayout: React.FC = () => {
+interface DashboardLayoutProps {
+    onLogout: () => void;
+}
+
+const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
+    const navigate = useNavigate();
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -517,7 +523,14 @@ const DashboardLayout: React.FC = () => {
                                             </button>
                                         </div>
                                         <div className="p-2 border-t border-slate-100">
-                                            <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium">
+                                            <button
+                                                onClick={() => {
+                                                    clearAuth();
+                                                    onLogout();
+                                                    navigate('/login', { replace: true });
+                                                }}
+                                                className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium"
+                                            >
                                                 <LogOut className="h-4 w-4" />
                                                 Sign Out
                                             </button>
