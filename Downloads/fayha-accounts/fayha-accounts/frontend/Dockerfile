@@ -15,4 +15,4 @@ RUN npm install -g serve
 
 EXPOSE 3000
 
-CMD ["serve", "dist", "-s", "-l", "3000"]
+CMD ["serve", "dist", "-s", "-l", "tcp://0.0.0.0:3000"]
