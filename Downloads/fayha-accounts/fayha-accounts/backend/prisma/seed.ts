@@ -1352,7 +1352,7 @@ async function main() {
       { key: 'COMPANY_NAME', value: 'Fayha Arabia Company', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_NAME_AR', value: 'شركة فيحا أرابيا', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_CR_NUMBER', value: '1010616141', type: 'STRING', category: 'COMPANY' },
-      { key: 'COMPANY_VAT_NUMBER', value: '311467026900003', type: 'STRING', category: 'COMPANY' },
+      { key: 'COMPANY_VAT_NUMBER', value: '314257580500003', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_ADDRESS', value: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_CITY', value: 'Riyadh', type: 'STRING', category: 'COMPANY' },
       { key: 'COMPANY_DISTRICT', value: 'Al Mishael Dist.', type: 'STRING', category: 'COMPANY' },

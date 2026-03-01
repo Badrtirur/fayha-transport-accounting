@@ -152,6 +152,7 @@ const SalesInvoiceList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [activeCategory, setActiveCategory] = useState<InvoiceCategory | 'All'>('All');
+  const [activeStatusFilter, setActiveStatusFilter] = useState<'All' | 'ZATCA' | 'DRAFT' | 'INVOICED'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [filterClientId, setFilterClientId] = useState('');
@@ -245,6 +246,12 @@ const SalesInvoiceList: React.FC = () => {
     .filter((inv) => activeCategory === 'All' || inv.category === activeCategory)
     .filter((inv) => !filterClientId || inv.clientId === filterClientId)
     .filter((inv) => {
+      if (activeStatusFilter === 'ZATCA') return inv.zatcaStatus === 'Synced With Zatca';
+      if (activeStatusFilter === 'DRAFT') return inv.status === 'DRAFT';
+      if (activeStatusFilter === 'INVOICED') return inv.status === 'INVOICED';
+      return true;
+    })
+    .filter((inv) => {
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
       return (
@@ -252,6 +259,12 @@ const SalesInvoiceList: React.FC = () => {
         getClientName(inv.clientId).toLowerCase().includes(q) ||
         getJobRefNo(inv.jobReferenceId || inv.jobRefId || '').toLowerCase().includes(q)
       );
+    })
+    .sort((a, b) => {
+      if (activeStatusFilter !== 'All') {
+        return getClientName(a.clientId).localeCompare(getClientName(b.clientId));
+      }
+      return 0;
     });
 
   const paginated = filtered.slice(
@@ -313,6 +326,69 @@ const SalesInvoiceList: React.FC = () => {
           </button>
         ))}
       </div>
+
+      {/* Status Filter Containers */}
+      {(() => {
+        const zatcaInvoices = invoices.filter((i) => i.zatcaStatus === 'Synced With Zatca');
+        const draftInvoices = invoices.filter((i) => i.status === 'DRAFT');
+        const invoicedInvoices = invoices.filter((i) => i.status === 'INVOICED');
+        const statusCards: { key: 'ZATCA' | 'DRAFT' | 'INVOICED'; label: string; icon: typeof ShieldCheck; count: number; total: number; borderColor: string; bgColor: string; iconBg: string; iconColor: string }[] = [
+          {
+            key: 'ZATCA', label: 'ZATCA Connected', icon: ShieldCheck,
+            count: zatcaInvoices.length,
+            total: zatcaInvoices.reduce((s, i) => s + (i.totalAmount || i.grandTotal || 0), 0),
+            borderColor: 'border-emerald-400', bgColor: 'bg-emerald-50/60', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600',
+          },
+          {
+            key: 'DRAFT', label: 'Draft', icon: FileText,
+            count: draftInvoices.length,
+            total: draftInvoices.reduce((s, i) => s + (i.totalAmount || i.grandTotal || 0), 0),
+            borderColor: 'border-slate-400', bgColor: 'bg-slate-50/60', iconBg: 'bg-slate-100', iconColor: 'text-slate-600',
+          },
+          {
+            key: 'INVOICED', label: 'Invoiced', icon: CheckCircle,
+            count: invoicedInvoices.length,
+            total: invoicedInvoices.reduce((s, i) => s + (i.totalAmount || i.grandTotal || 0), 0),
+            borderColor: 'border-indigo-400', bgColor: 'bg-indigo-50/60', iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600',
+          },
+        ];
+        return (
+          <div className="grid grid-cols-3 gap-4">
+            {statusCards.map((card) => {
+              const Icon = card.icon;
+              const isActive = activeStatusFilter === card.key;
+              return (
+                <button
+                  key={card.key}
+                  onClick={() => {
+                    setActiveStatusFilter(isActive ? 'All' : card.key);
+                    setCurrentPage(1);
+                  }}
+                  className={`bg-white rounded-2xl p-4 border-2 text-left transition-all ${
+                    isActive
+                      ? `${card.borderColor} ${card.bgColor} shadow-md ring-1 ring-${card.key === 'ZATCA' ? 'emerald' : card.key === 'DRAFT' ? 'slate' : 'indigo'}-200`
+                      : 'border-slate-100 hover:border-slate-200 hover:shadow-sm'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isActive ? card.iconBg : 'bg-slate-100'}`}>
+                      <Icon className={`h-4.5 w-4.5 ${isActive ? card.iconColor : 'text-slate-400'}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className={`text-xs font-semibold ${isActive ? card.iconColor : 'text-slate-500'}`}>{card.label}</p>
+                      <p className="text-lg font-bold text-slate-900">{card.count}</p>
+                    </div>
+                    <div className="ml-auto text-right">
+                      <p className="text-[10px] text-slate-400 uppercase font-medium">Total</p>
+                      <p className="text-sm font-semibold text-slate-700">SAR {card.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

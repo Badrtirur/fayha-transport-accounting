@@ -10,7 +10,7 @@ import { buildZatcaTlv } from '../../utils/zatca';
 const DEFAULT_COMPANY = {
     name: 'Fayha Arabia Company',
     crNumber: '1010616141',
-    vatNumber: '311467026900003',
+    vatNumber: '314257580500003',
     address: 'Building No: 8298, Prince Muhammad Ibn Abdulrahman Ibn Abdulaziz, Al Mishael Dist., Riyadh 14325, Saudi Arabia',
     city: 'Riyadh',
     country: 'Saudi Arabia',

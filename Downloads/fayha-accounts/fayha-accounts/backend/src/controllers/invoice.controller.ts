@@ -114,7 +114,7 @@ export const invoiceController = {
         },
         {
           sellerName: settingsMap['COMPANY_NAME'] || 'Fayha Arabia Company',
-          vatNumber: settingsMap['COMPANY_VAT_NUMBER'] || '311467026900003',
+          vatNumber: settingsMap['COMPANY_VAT_NUMBER'] || '314257580500003',
         },
       );
 
