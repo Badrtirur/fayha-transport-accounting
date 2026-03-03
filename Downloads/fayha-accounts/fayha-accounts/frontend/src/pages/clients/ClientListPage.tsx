@@ -121,6 +121,20 @@ const ClientListPage: React.FC = () => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleParentAccountChange = async (parentAccountId: string) => {
+    setField('parentAccountId', parentAccountId);
+    if (!parentAccountId) {
+      setField('ledgerCode', '');
+      return;
+    }
+    try {
+      const { nextCode } = await accountsApi.getNextCode(parentAccountId);
+      setField('ledgerCode', nextCode || '');
+    } catch {
+      // Silent fail - user can still type manually
+    }
+  };
+
   const handleSaveClient = async () => {
     if (!form.name) {
       toast.error('Please enter a client name.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
@@ -740,15 +754,15 @@ const ClientListPage: React.FC = () => {
                 label="Parent Group In Accounting"
                 options={accountOptions}
                 value={form.parentAccountId}
-                onChange={(val) => setField('parentAccountId', val)}
+                onChange={handleParentAccountChange}
                 placeholder="Select accounting parent group..."
               />
 
               {/* Ledger Code / Ledger Note */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ledger Code</label>
-                  <input type="text" className="input-premium w-full" placeholder="e.g. 01-02-01-0086" value={form.ledgerCode} onChange={(e) => setField('ledgerCode', e.target.value)} />
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ledger Code {form.parentAccountId ? '(Auto)' : ''}</label>
+                  <input type="text" className={`input-premium w-full ${form.parentAccountId ? 'bg-slate-50 text-slate-600' : ''}`} placeholder="e.g. 01-02-01-0086" value={form.ledgerCode} onChange={(e) => setField('ledgerCode', e.target.value)} readOnly={!!form.parentAccountId} />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1.5">Ledger Note</label>

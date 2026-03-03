@@ -247,6 +247,54 @@ export const customerController = {
 
       if (!data.name) return res.status(400).json({ success: false, error: 'Name is required' });
 
+      // Auto-create ledger account if parentAccountId is provided
+      if (data.parentAccountId && !data.ledgerCode) {
+        try {
+          const parentAcct = await prisma.account.findUnique({ where: { id: data.parentAccountId } });
+          if (parentAcct) {
+            // Find next code under this parent
+            const children = await prisma.account.findMany({
+              where: { parentId: parentAcct.id },
+              select: { code: true },
+              orderBy: { code: 'asc' },
+            });
+            let nextSeq = 1;
+            if (children.length > 0) {
+              const nums = children.map(c => {
+                const suffix = c.code.slice(parentAcct.code.length + 1);
+                return parseInt(suffix, 10) || 0;
+              });
+              nextSeq = Math.max(...nums) + 1;
+            }
+            let padding = 4;
+            if (children.length > 0) {
+              const lastSuffix = children[children.length - 1].code.slice(parentAcct.code.length + 1);
+              padding = Math.max(lastSuffix.length, 2);
+            }
+            const ledgerCode = `${parentAcct.code}-${String(nextSeq).padStart(padding, '0')}`;
+            data.ledgerCode = ledgerCode;
+
+            // Create the actual account in Chart of Accounts
+            await prisma.account.create({
+              data: {
+                code: ledgerCode,
+                name: data.name,
+                nameAr: data.nameAr || null,
+                type: parentAcct.type,
+                subType: 'LEDGER',
+                parentId: parentAcct.id,
+                isActive: true,
+              },
+            });
+          }
+        } catch (acctErr: any) {
+          // If account already exists (duplicate code), just link it
+          if (acctErr.code !== 'P2002') {
+            console.error('Failed to auto-create ledger account:', acctErr.message);
+          }
+        }
+      }
+
       const customer = await prisma.customer.create({ data });
       res.status(201).json({ success: true, data: customer });
     } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
@@ -273,6 +321,54 @@ export const customerController = {
           }
         }
       }
+
+      // Auto-create ledger account if parentAccountId is set and no ledger exists yet
+      if (data.parentAccountId) {
+        const existing = await prisma.customer.findUnique({ where: { id: req.params.id }, select: { ledgerCode: true } });
+        if (!existing?.ledgerCode && !data.ledgerCode) {
+          try {
+            const parentAcct = await prisma.account.findUnique({ where: { id: data.parentAccountId } });
+            if (parentAcct) {
+              const children = await prisma.account.findMany({
+                where: { parentId: parentAcct.id },
+                select: { code: true },
+                orderBy: { code: 'asc' },
+              });
+              let nextSeq = 1;
+              if (children.length > 0) {
+                const nums = children.map(c => {
+                  const suffix = c.code.slice(parentAcct.code.length + 1);
+                  return parseInt(suffix, 10) || 0;
+                });
+                nextSeq = Math.max(...nums) + 1;
+              }
+              let padding = 4;
+              if (children.length > 0) {
+                const lastSuffix = children[children.length - 1].code.slice(parentAcct.code.length + 1);
+                padding = Math.max(lastSuffix.length, 2);
+              }
+              const ledgerCode = `${parentAcct.code}-${String(nextSeq).padStart(padding, '0')}`;
+              data.ledgerCode = ledgerCode;
+
+              await prisma.account.create({
+                data: {
+                  code: ledgerCode,
+                  name: data.name || (await prisma.customer.findUnique({ where: { id: req.params.id } }))?.name || 'Customer Account',
+                  type: parentAcct.type,
+                  subType: 'LEDGER',
+                  parentId: parentAcct.id,
+                  isActive: true,
+                },
+              });
+            }
+          } catch (acctErr: any) {
+            if (acctErr.code !== 'P2002') {
+              console.error('Failed to auto-create ledger account:', acctErr.message);
+            }
+          }
+        }
+      }
+
       const customer = await prisma.customer.update({ where: { id: req.params.id }, data });
       res.json({ success: true, data: customer });
     } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
