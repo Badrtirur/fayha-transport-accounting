@@ -46,7 +46,7 @@ import {
     BookOpen,
     Wallet
 } from 'lucide-react';
-import { clearAuth, dashboardApi } from '../services/api';
+import { clearAuth, dashboardApi, authApi } from '../services/api';
 
 interface NavChildItem {
     name: string;
@@ -73,6 +73,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [notificationsOpen, setNotificationsOpen] = useState(false);
     const [notifications, setNotifications] = useState<{ id: string; title: string; time: string; type: string }[]>([]);
+    const [user, setUser] = useState<{ firstName?: string; lastName?: string; email?: string; role?: string } | null>(null);
     const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
     const location = useLocation();
 
@@ -80,7 +81,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
         dashboardApi.getNotifications()
             .then(data => setNotifications(Array.isArray(data) ? data : []))
             .catch(() => setNotifications([]));
+        authApi.getProfile()
+            .then(data => setUser(data))
+            .catch(() => {});
     }, []);
+
+    const userName = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'User' : 'Loading...';
+    const userInitials = user ? `${(user.firstName || '')[0] || ''}${(user.lastName || '')[0] || ''}`.toUpperCase() || 'U' : '..';
+    const userRole = user?.role ? user.role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '';
+    const userEmail = user?.email || '';
 
     const toggleSubMenu = (name: string) => {
         setExpandedMenus((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -361,14 +370,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
                     <div className={`flex items-center gap-3 p-2.5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer ${sidebarCollapsed ? 'justify-center' : ''}`}>
                         <div className="relative flex-shrink-0">
                             <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-purple-500/20">
-                                FA
+                                {userInitials}
                             </div>
                             <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-400 border-2 border-slate-900" />
                         </div>
                         {!sidebarCollapsed && (
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm font-semibold text-white truncate">Fayha Admin</p>
-                                <p className="text-[11px] text-slate-500 truncate">Super Admin</p>
+                                <p className="text-sm font-semibold text-white truncate">{userName}</p>
+                                <p className="text-[11px] text-slate-500 truncate">{userRole}</p>
                             </div>
                         )}
                         {!sidebarCollapsed && <ChevronDown className="h-4 w-4 text-slate-500 flex-shrink-0" />}
@@ -478,11 +487,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
                                     className="flex items-center gap-2.5 p-1.5 pr-3 hover:bg-slate-100 rounded-xl transition-all"
                                 >
                                     <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
-                                        FA
+                                        {userInitials}
                                     </div>
                                     <div className="hidden md:block text-left">
-                                        <p className="text-sm font-semibold text-slate-700 leading-tight">Fayha Admin</p>
-                                        <p className="text-[10px] text-slate-400">Super Admin</p>
+                                        <p className="text-sm font-semibold text-slate-700 leading-tight">{userName}</p>
+                                        <p className="text-[10px] text-slate-400">{userRole}</p>
                                     </div>
                                     <ChevronDown className="h-3.5 w-3.5 text-slate-400 hidden md:block" />
                                 </button>
@@ -493,32 +502,32 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
                                         <div className="p-4 border-b border-slate-100">
                                             <div className="flex items-center gap-3">
                                                 <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-white font-bold">
-                                                    FA
+                                                    {userInitials}
                                                 </div>
                                                 <div>
-                                                    <p className="font-bold text-slate-900">Fayha Admin</p>
-                                                    <p className="text-xs text-slate-500">admin@fayha.com</p>
+                                                    <p className="font-bold text-slate-900">{userName}</p>
+                                                    <p className="text-xs text-slate-500">{userEmail}</p>
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="p-2">
-                                            <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
+                                            <button onClick={() => { setUserMenuOpen(false); navigate('/settings'); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
                                                 <UserCircle className="h-4 w-4 text-slate-400" />
                                                 My Profile
                                             </button>
-                                            <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
+                                            <button onClick={() => { setUserMenuOpen(false); navigate('/settings'); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
                                                 <Shield className="h-4 w-4 text-slate-400" />
                                                 Security Settings
                                             </button>
-                                            <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
+                                            <button onClick={() => { setUserMenuOpen(false); navigate('/settings'); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
                                                 <Globe className="h-4 w-4 text-slate-400" />
                                                 Language & Region
                                             </button>
-                                            <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
+                                            <button onClick={() => { setUserMenuOpen(false); navigate('/display'); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
                                                 <Moon className="h-4 w-4 text-slate-400" />
                                                 Dark Mode
                                             </button>
-                                            <button className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
+                                            <button onClick={() => { setUserMenuOpen(false); navigate('/settings'); }} className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-xl transition-colors">
                                                 <HelpCircle className="h-4 w-4 text-slate-400" />
                                                 Help & Support
                                             </button>
