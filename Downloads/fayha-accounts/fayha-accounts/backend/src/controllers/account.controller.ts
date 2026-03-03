@@ -54,6 +54,55 @@ export const accountController = {
     }
   },
 
+  // GET /api/v1/accounts/:id/next-code
+  // Returns the next sequential child code for a given parent account
+  async getNextCode(req: AuthRequest, res: Response) {
+    try {
+      const parent = await prisma.account.findUnique({ where: { id: req.params.id } });
+      if (!parent) {
+        return res.status(404).json({ success: false, error: 'Parent account not found' });
+      }
+
+      // Find all direct children of this parent
+      const children = await prisma.account.findMany({
+        where: { parentId: parent.id },
+        select: { code: true },
+        orderBy: { code: 'asc' },
+      });
+
+      const parentCode = parent.code;
+      let nextSeq = 1;
+
+      if (children.length > 0) {
+        // Extract the last segment number from each child code
+        const nums = children.map(c => {
+          const suffix = c.code.slice(parentCode.length + 1); // remove "parentCode-"
+          const num = parseInt(suffix, 10);
+          return isNaN(num) ? 0 : num;
+        });
+        nextSeq = Math.max(...nums) + 1;
+      }
+
+      // Determine padding: if parent has children with 4-digit suffixes use 4, otherwise use 4
+      const hasGroupChildren = children.some(c => {
+        const suffix = c.code.slice(parentCode.length + 1);
+        return suffix.length <= 2; // short suffix = sub-group like "01"
+      });
+      // Check existing children suffix format
+      let padding = 4;
+      if (children.length > 0) {
+        const lastSuffix = children[children.length - 1].code.slice(parentCode.length + 1);
+        padding = Math.max(lastSuffix.length, 2);
+      }
+
+      const nextCode = `${parentCode}-${String(nextSeq).padStart(padding, '0')}`;
+
+      res.json({ success: true, data: { nextCode, parentCode } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
   // POST /api/v1/accounts
   async create(req: AuthRequest, res: Response) {
     try {

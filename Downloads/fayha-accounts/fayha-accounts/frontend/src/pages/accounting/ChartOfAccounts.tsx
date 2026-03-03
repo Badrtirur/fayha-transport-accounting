@@ -80,6 +80,22 @@ const ChartOfAccounts: React.FC = () => {
         setShowModal(true);
     };
 
+    const handleParentChange = async (parentId: string) => {
+        setForm(p => ({ ...p, parentId }));
+        if (!parentId || editingAccount) return;
+        try {
+            const { nextCode } = await accountsApi.getNextCode(parentId);
+            const parent = accounts.find(a => a.id === parentId);
+            setForm(p => ({
+                ...p,
+                code: nextCode,
+                type: parent?.type || p.type,
+            }));
+        } catch {
+            // Silent fail — user can still type code manually
+        }
+    };
+
     const openEditModal = (account: Account) => {
         setEditingAccount(account);
         setForm({
@@ -328,8 +344,9 @@ const ChartOfAccounts: React.FC = () => {
                                         type="text"
                                         value={form.code}
                                         onChange={e => setForm(p => ({ ...p, code: e.target.value }))}
-                                        className="input-premium w-full"
-                                        placeholder="e.g. 1150"
+                                        className={`input-premium w-full ${form.parentId && !editingAccount ? 'bg-slate-50 text-slate-600' : ''}`}
+                                        placeholder="Auto-generated when parent selected"
+                                        readOnly={!!(form.parentId && !editingAccount)}
                                     />
                                 </div>
                                 <div>
@@ -360,7 +377,7 @@ const ChartOfAccounts: React.FC = () => {
                                     <label className="block text-xs font-semibold text-slate-500 mb-1.5">Parent Account</label>
                                     <select
                                         value={form.parentId}
-                                        onChange={e => setForm(p => ({ ...p, parentId: e.target.value }))}
+                                        onChange={e => handleParentChange(e.target.value)}
                                         className="input-premium w-full"
                                     >
                                         <option value="">-- No Parent (Root) --</option>

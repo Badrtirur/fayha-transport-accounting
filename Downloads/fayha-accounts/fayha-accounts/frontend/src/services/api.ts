@@ -256,7 +256,12 @@ export function createCrudApi<T = any>(resource: string): CrudApi<T> {
 
 // ==================== CORE ACCOUNTING ====================
 
-export const accountsApi = createCrudApi<any>('accounts');
+export const accountsApi = {
+  ...createCrudApi<any>('accounts'),
+  /** Get the next sequential child code for a parent account. */
+  getNextCode: (parentId: string) =>
+    apiFetch<{ nextCode: string; parentCode: string }>(`/accounts/${parentId}/next-code`),
+};
 
 export const journalsApi = {
   ...createCrudApi<any>('journals'),

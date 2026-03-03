@@ -72,6 +72,7 @@ router.get('/dashboard/income-statement', authenticate, dashboardController.getI
 // ==================== CHART OF ACCOUNTS ====================
 router.get('/accounts', authenticate, accountController.getAll);
 router.get('/accounts/trial-balance', authenticate, accountController.getTrialBalance);
+router.get('/accounts/:id/next-code', authenticate, accountController.getNextCode);
 router.get('/accounts/:id', authenticate, accountController.getById);
 router.get('/accounts/:id/ledger', authenticate, accountController.getLedger);
 router.post('/accounts', authenticate, accountController.create);
