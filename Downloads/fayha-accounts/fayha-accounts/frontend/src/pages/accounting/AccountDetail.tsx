@@ -287,8 +287,13 @@ const AccountDetail: React.FC = () => {
                         <td className="py-3 px-4 text-sm text-slate-600">
                           {entry.date ? new Date(entry.date).toLocaleDateString() : '-'}
                         </td>
-                        <td className="py-3 px-4 text-sm font-mono text-indigo-600 font-medium">
-                          {entry.entryNumber}
+                        <td className="py-3 px-4 text-sm font-mono font-medium">
+                          <button
+                            onClick={() => navigate(`/accounting/journal-entries?highlight=${encodeURIComponent(entry.entryNumber)}`)}
+                            className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                          >
+                            {entry.entryNumber}
+                          </button>
                         </td>
                         <td className="py-3 px-4 text-sm text-slate-700">{entry.description}</td>
                         <td className="py-3 px-4 text-right text-sm font-bold">

@@ -85,6 +85,7 @@ router.get('/journals/:id', authenticate, journalController.getById);
 router.post('/journals', authenticate, journalController.create);
 router.post('/journals/:id/post', authenticate, journalController.postEntry);
 router.post('/journals/:id/void', authenticate, journalController.voidEntry);
+router.delete('/journals/:id', authenticate, journalController.remove);
 
 // ==================== INVOICES (AR) ====================
 router.get('/invoices', authenticate, invoiceController.getAll);

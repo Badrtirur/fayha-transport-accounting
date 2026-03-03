@@ -206,6 +206,54 @@ export const journalController = {
     }
   },
 
+  // DELETE /api/v1/journals/:id
+  async remove(req: AuthRequest, res: Response) {
+    try {
+      const entry = await prisma.journalEntry.findUnique({
+        where: { id: req.params.id },
+        include: { lines: { include: { account: { select: { type: true } } } } }
+      });
+
+      if (!entry) return res.status(404).json({ success: false, error: 'Journal entry not found' });
+
+      // If the entry was POSTED, reverse account balances before deleting
+      if (entry.status === 'POSTED') {
+        for (const line of entry.lines) {
+          if (!line.account) continue;
+
+          const typeUpper = (line.account.type || '').toUpperCase();
+          const isNormalDebit = ['ASSET', 'EXPENSE'].includes(typeUpper);
+          let balanceChange = 0;
+
+          if (isNormalDebit) {
+            balanceChange = Number(line.creditAmount) - Number(line.debitAmount); // Reverse
+          } else {
+            balanceChange = Number(line.debitAmount) - Number(line.creditAmount); // Reverse
+          }
+
+          await prisma.account.update({
+            where: { id: line.accountId },
+            data: { currentBalance: { increment: balanceChange } }
+          });
+        }
+      }
+
+      // Delete the entry (JournalLines are cascade-deleted by Prisma)
+      await prisma.journalEntry.delete({ where: { id: req.params.id } });
+
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id, action: 'DELETE',
+          entityType: 'JournalEntry', entityId: req.params.id,
+        }
+      });
+
+      res.json({ success: true, message: 'Journal entry deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
   // POST /api/v1/journals/:id/void
   async voidEntry(req: AuthRequest, res: Response) {
     try {

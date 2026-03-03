@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { accountsApi, accountingApi } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -17,6 +17,7 @@ interface LedgerEntry {
 }
 
 const GeneralLedger: React.FC = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -242,7 +243,14 @@ const GeneralLedger: React.FC = () => {
                     ) : entries.map((entry, idx) => (
                       <tr key={entry.id || idx} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0">
                         <td className="py-3 px-4 text-sm text-slate-600">{entry.date ? new Date(entry.date).toLocaleDateString() : '-'}</td>
-                        <td className="py-3 px-4 text-sm font-mono text-indigo-600 font-medium">{entry.entryNumber}</td>
+                        <td className="py-3 px-4 text-sm font-mono font-medium">
+                          <button
+                            onClick={() => navigate(`/accounting/journal-entries?highlight=${encodeURIComponent(entry.entryNumber)}`)}
+                            className="text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+                          >
+                            {entry.entryNumber}
+                          </button>
+                        </td>
                         <td className="py-3 px-4 text-sm text-slate-700">{entry.description}</td>
                         <td className="py-3 px-4 text-right text-sm font-bold">
                           {entry.debit > 0 ? <span className="text-blue-700">{(entry.debit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : <span className="text-slate-300">-</span>}
