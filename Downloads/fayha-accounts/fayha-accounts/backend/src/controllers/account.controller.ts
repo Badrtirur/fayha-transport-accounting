@@ -179,6 +179,46 @@ export const accountController = {
     }
   },
 
+  // DELETE /api/v1/accounts/:id
+  async delete(req: AuthRequest, res: Response) {
+    try {
+      const account = await prisma.account.findUnique({
+        where: { id: req.params.id },
+        include: { children: { select: { id: true } } },
+      });
+      if (!account) {
+        return res.status(404).json({ success: false, error: 'Account not found' });
+      }
+
+      // Prevent deletion if account has children
+      if (account.children && account.children.length > 0) {
+        return res.status(400).json({ success: false, error: 'Cannot delete account with sub-accounts. Delete children first.' });
+      }
+
+      // Check if account has journal entries
+      const journalLineCount = await prisma.journalLine.count({ where: { accountId: req.params.id } });
+      if (journalLineCount > 0) {
+        return res.status(400).json({ success: false, error: 'Cannot delete account with journal entries. Remove transactions first.' });
+      }
+
+      await prisma.account.delete({ where: { id: req.params.id } });
+
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user!.id,
+          action: 'DELETE',
+          entityType: 'Account',
+          entityId: req.params.id,
+          oldData: JSON.stringify({ id: account.id, code: account.code, name: account.name }),
+        }
+      });
+
+      res.json({ success: true, data: { message: 'Account deleted successfully' } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
   // GET /api/v1/accounts/:id/ledger
   async getLedger(req: AuthRequest, res: Response) {
     try {

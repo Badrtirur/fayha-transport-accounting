@@ -77,6 +77,7 @@ router.get('/accounts/:id', authenticate, accountController.getById);
 router.get('/accounts/:id/ledger', authenticate, accountController.getLedger);
 router.post('/accounts', authenticate, accountController.create);
 router.put('/accounts/:id', authenticate, accountController.update);
+router.delete('/accounts/:id', authenticate, accountController.delete);
 
 // ==================== JOURNAL ENTRIES ====================
 router.get('/journals', authenticate, journalController.getAll);

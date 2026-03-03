@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import { accountsApi } from '../../services/api';
 import { Account } from '../../types';
 import toast from 'react-hot-toast';
 import {
-    Folder, FileText, ChevronRight, TrendingUp, TrendingDown, Wallet, Landmark,
+    Folder, FileText, ChevronRight, ChevronDown, TrendingUp, TrendingDown, Wallet, Landmark,
     DollarSign, BarChart3, Plus, Edit3, Trash2, X, Loader2,
 } from 'lucide-react';
 
@@ -21,6 +22,11 @@ const typeConfig: Record<string, { bg: string; text: string; icon: any; label: s
     'Expense': { bg: 'bg-amber-50', text: 'text-amber-600', icon: DollarSign, label: 'Expense' },
 };
 
+interface TreeNode extends Account {
+    children: TreeNode[];
+    depth: number;
+}
+
 const ACCOUNT_TYPES = [
     { value: 'ASSET', label: 'Asset' },
     { value: 'LIABILITY', label: 'Liability' },
@@ -32,9 +38,13 @@ const ACCOUNT_TYPES = [
 const emptyForm = { code: '', name: '', type: 'ASSET', subType: 'GENERAL', parentId: '', description: '', balance: 0 };
 
 const ChartOfAccounts: React.FC = () => {
+    const navigate = useNavigate();
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+
+    // Tree expand/collapse state
+    const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
     // Modal state
     const [showModal, setShowModal] = useState(false);
@@ -68,6 +78,81 @@ const ChartOfAccounts: React.FC = () => {
     useEffect(() => {
         fetchAccounts();
     }, []);
+
+    // Build tree structure from flat list
+    const tree = useMemo(() => {
+        const map = new Map<string, TreeNode>();
+        const roots: TreeNode[] = [];
+
+        // First pass: create TreeNode for each account
+        for (const acc of accounts) {
+            map.set(acc.id, { ...acc, children: [], depth: 0 });
+        }
+
+        // Second pass: link children to parents
+        for (const acc of accounts) {
+            const node = map.get(acc.id)!;
+            if (acc.parentId && map.has(acc.parentId)) {
+                const parent = map.get(acc.parentId)!;
+                parent.children.push(node);
+            } else {
+                roots.push(node);
+            }
+        }
+
+        // Third pass: compute depths
+        const setDepth = (nodes: TreeNode[], depth: number) => {
+            for (const n of nodes) {
+                n.depth = depth;
+                n.children.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+                setDepth(n.children, depth + 1);
+            }
+        };
+        roots.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+        setDepth(roots, 0);
+
+        return roots;
+    }, [accounts]);
+
+    // On first load, auto-expand root level
+    useEffect(() => {
+        if (tree.length > 0 && expanded.size === 0) {
+            setExpanded(new Set(tree.map(n => n.id)));
+        }
+    }, [tree]);
+
+    const toggleExpand = useCallback((id: string) => {
+        setExpanded(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
+
+    const expandAll = useCallback(() => {
+        const allGroupIds = accounts.filter(a => a.isGroup).map(a => a.id);
+        setExpanded(new Set(allGroupIds));
+    }, [accounts]);
+
+    const collapseAll = useCallback(() => {
+        setExpanded(new Set());
+    }, []);
+
+    // Flatten tree for rendering based on expanded state
+    const visibleRows = useMemo(() => {
+        const rows: TreeNode[] = [];
+        const walk = (nodes: TreeNode[]) => {
+            for (const node of nodes) {
+                rows.push(node);
+                if (node.isGroup && expanded.has(node.id)) {
+                    walk(node.children);
+                }
+            }
+        };
+        walk(tree);
+        return rows;
+    }, [tree, expanded]);
 
     const totalAssets = accounts.filter(a => (a.type || '').toUpperCase() === 'ASSET' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
     const totalLiabilities = accounts.filter(a => (a.type || '').toUpperCase() === 'LIABILITY' && !a.isGroup).reduce((s, a) => s + (a.balance || 0), 0);
@@ -232,7 +317,18 @@ const ChartOfAccounts: React.FC = () => {
                 </div>
             </div>
 
-            {/* Accounts Table */}
+            {/* Expand / Collapse controls */}
+            <div className="flex items-center gap-2">
+                <button onClick={expandAll} className="text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-all">
+                    Expand All
+                </button>
+                <button onClick={collapseAll} className="text-xs font-medium text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg hover:bg-slate-50 transition-all">
+                    Collapse All
+                </button>
+                <span className="text-xs text-slate-400 ml-2">{visibleRows.length} of {accounts.length} accounts shown</span>
+            </div>
+
+            {/* Accounts Tree Table */}
             <div className="bg-white rounded-2xl shadow-card border border-slate-100/80 overflow-hidden">
                 <table className="table-premium">
                     <thead>
@@ -245,7 +341,7 @@ const ChartOfAccounts: React.FC = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {accounts.length === 0 ? (
+                        {visibleRows.length === 0 ? (
                             <tr>
                                 <td colSpan={5} className="text-center py-16 text-slate-400">
                                     <Folder className="h-12 w-12 mx-auto mb-3 text-slate-200" />
@@ -254,39 +350,61 @@ const ChartOfAccounts: React.FC = () => {
                                 </td>
                             </tr>
                         ) : (
-                            accounts.map(account => {
-                                const paddingLeft = (account.level || 1) * 24 - 8;
+                            visibleRows.map(account => {
+                                const indent = account.depth * 24;
                                 const isGroup = account.isGroup;
+                                const isExpanded = expanded.has(account.id);
                                 const config = typeConfig[account.type] || typeConfig['Asset'];
+                                const hasChildren = isGroup && account.children.length > 0;
 
                                 return (
-                                    <tr key={account.id} className="hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0 group">
-                                        <td className="py-3.5 pr-4 text-slate-400 font-mono text-sm font-semibold" style={{ paddingLeft: '1.5rem' }}>
-                                            {account.code}
+                                    <tr key={account.id} className={`hover:bg-slate-50/80 transition-colors border-b border-slate-100/80 last:border-0 group ${account.depth === 0 ? 'bg-slate-50/40' : ''}`}>
+                                        <td className="py-3 pr-4 font-mono text-sm font-semibold" style={{ paddingLeft: '1.5rem' }}>
+                                            <span className="text-slate-400">{account.code}</span>
                                         </td>
-                                        <td className="py-3.5 pr-4" style={{ paddingLeft: `${paddingLeft}px` }}>
-                                            <div className="flex items-center gap-2.5">
+                                        <td className="py-3 pr-4" style={{ paddingLeft: `${indent + 12}px` }}>
+                                            <div className="flex items-center gap-2">
+                                                {/* Expand/Collapse toggle for group accounts */}
+                                                {hasChildren ? (
+                                                    <button
+                                                        onClick={() => toggleExpand(account.id)}
+                                                        className="h-6 w-6 rounded-md flex items-center justify-center hover:bg-slate-200/60 transition-colors flex-shrink-0"
+                                                    >
+                                                        {isExpanded ? (
+                                                            <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
+                                                        ) : (
+                                                            <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                                                        )}
+                                                    </button>
+                                                ) : (
+                                                    <span className="w-6 flex-shrink-0" />
+                                                )}
                                                 {isGroup ? (
-                                                    <div className="h-7 w-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500">
+                                                    <div className="h-7 w-7 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500 flex-shrink-0">
                                                         <Folder className="h-3.5 w-3.5" />
                                                     </div>
                                                 ) : (
-                                                    <div className="h-7 w-7 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400">
+                                                    <div className="h-7 w-7 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 flex-shrink-0">
                                                         <FileText className="h-3.5 w-3.5" />
                                                     </div>
                                                 )}
-                                                <span className={`text-sm ${isGroup ? 'font-bold text-slate-900' : 'text-slate-700 font-medium'}`}>
+                                                <button
+                                                    onClick={() => navigate(`/accounting/account/${account.id}`)}
+                                                    className={`text-sm text-left hover:underline hover:text-blue-600 transition-colors ${isGroup ? 'font-bold text-slate-900' : 'text-slate-700 font-medium'}`}
+                                                >
                                                     {account.name}
-                                                </span>
-                                                {isGroup && <ChevronRight className="h-3.5 w-3.5 text-slate-300" />}
+                                                </button>
+                                                {hasChildren && !isExpanded && (
+                                                    <span className="text-xs text-slate-400 ml-1">({account.children.length})</span>
+                                                )}
                                             </div>
                                         </td>
-                                        <td className="py-3.5 px-4">
+                                        <td className="py-3 px-4">
                                             <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-semibold ${config.bg} ${config.text}`}>
                                                 {config.label || account.type}
                                             </span>
                                         </td>
-                                        <td className="py-3.5 px-4 text-right">
+                                        <td className="py-3 px-4 text-right">
                                             {(account.balance || 0) !== 0 ? (
                                                 <span className={`text-sm font-bold ${(account.balance || 0) > 0 ? 'text-slate-900' : 'text-rose-600'}`}>
                                                     <span className={`text-xs font-semibold mr-1 ${(account.balance || 0) > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
@@ -298,7 +416,7 @@ const ChartOfAccounts: React.FC = () => {
                                                 <span className="text-sm text-slate-300">—</span>
                                             )}
                                         </td>
-                                        <td className="py-3.5 px-4 text-center">
+                                        <td className="py-3 px-4 text-center">
                                             <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button
                                                     onClick={() => openEditModal(account)}
