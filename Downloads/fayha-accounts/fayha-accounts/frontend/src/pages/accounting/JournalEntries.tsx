@@ -535,7 +535,7 @@ const JournalEntries: React.FC = () => {
                             </div>
 
                             {/* Lines */}
-                            <div className="border border-slate-200 rounded-xl overflow-visible">
+                            <div className="border border-slate-200 rounded-xl overflow-hidden">
                                 <table className="w-full">
                                     <thead className="bg-slate-50">
                                         <tr className="text-xs text-slate-500 uppercase tracking-wider">
