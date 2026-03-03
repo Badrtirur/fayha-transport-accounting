@@ -248,50 +248,55 @@ export const customerController = {
       if (!data.name) return res.status(400).json({ success: false, error: 'Name is required' });
 
       // Auto-create ledger account if parentAccountId is provided
-      if (data.parentAccountId && !data.ledgerCode) {
+      if (data.parentAccountId) {
         try {
           const parentAcct = await prisma.account.findUnique({ where: { id: data.parentAccountId } });
           if (parentAcct) {
-            // Find next code under this parent
-            const children = await prisma.account.findMany({
-              where: { parentId: parentAcct.id },
-              select: { code: true },
-              orderBy: { code: 'asc' },
-            });
-            let nextSeq = 1;
-            if (children.length > 0) {
-              const nums = children.map(c => {
-                const suffix = c.code.slice(parentAcct.code.length + 1);
-                return parseInt(suffix, 10) || 0;
+            // Generate ledger code if not provided
+            let ledgerCode = data.ledgerCode;
+            if (!ledgerCode) {
+              const children = await prisma.account.findMany({
+                where: { parentId: parentAcct.id },
+                select: { code: true },
+                orderBy: { code: 'asc' },
               });
-              nextSeq = Math.max(...nums) + 1;
+              let nextSeq = 1;
+              if (children.length > 0) {
+                const nums = children.map(c => {
+                  const suffix = c.code.slice(parentAcct.code.length + 1);
+                  return parseInt(suffix, 10) || 0;
+                });
+                nextSeq = Math.max(...nums) + 1;
+              }
+              let padding = 4;
+              if (children.length > 0) {
+                const lastSuffix = children[children.length - 1].code.slice(parentAcct.code.length + 1);
+                padding = Math.max(lastSuffix.length, 2);
+              }
+              ledgerCode = `${parentAcct.code}-${String(nextSeq).padStart(padding, '0')}`;
             }
-            let padding = 4;
-            if (children.length > 0) {
-              const lastSuffix = children[children.length - 1].code.slice(parentAcct.code.length + 1);
-              padding = Math.max(lastSuffix.length, 2);
-            }
-            const ledgerCode = `${parentAcct.code}-${String(nextSeq).padStart(padding, '0')}`;
             data.ledgerCode = ledgerCode;
 
-            // Create the actual account in Chart of Accounts
-            await prisma.account.create({
-              data: {
-                code: ledgerCode,
-                name: data.name,
-                nameAr: data.nameAr || null,
-                type: parentAcct.type,
-                subType: 'LEDGER',
-                parentId: parentAcct.id,
-                isActive: true,
-              },
-            });
+            // Check if account already exists, if not create it
+            const existingAcct = await prisma.account.findUnique({ where: { code: ledgerCode } });
+            if (!existingAcct) {
+              await prisma.account.create({
+                data: {
+                  code: ledgerCode,
+                  name: data.name,
+                  nameAr: data.nameAr || null,
+                  type: parentAcct.type,
+                  subType: 'LEDGER',
+                  parentId: parentAcct.id,
+                  isActive: true,
+                  openingBalance: 0,
+                  currentBalance: 0,
+                },
+              });
+            }
           }
         } catch (acctErr: any) {
-          // If account already exists (duplicate code), just link it
-          if (acctErr.code !== 'P2002') {
-            console.error('Failed to auto-create ledger account:', acctErr.message);
-          }
+          console.error('Failed to auto-create ledger account:', acctErr.message);
         }
       }
 
@@ -322,49 +327,61 @@ export const customerController = {
         }
       }
 
-      // Auto-create ledger account if parentAccountId is set and no ledger exists yet
+      // Auto-create ledger account if parentAccountId is set and no ledger account exists yet
       if (data.parentAccountId) {
-        const existing = await prisma.customer.findUnique({ where: { id: req.params.id }, select: { ledgerCode: true } });
-        if (!existing?.ledgerCode && !data.ledgerCode) {
+        const existing = await prisma.customer.findUnique({ where: { id: req.params.id }, select: { ledgerCode: true, name: true } });
+        const ledgerCodeToUse = data.ledgerCode || existing?.ledgerCode;
+
+        // Check if account already exists in COA
+        let acctExists = false;
+        if (ledgerCodeToUse) {
+          acctExists = !!(await prisma.account.findUnique({ where: { code: ledgerCodeToUse } }));
+        }
+
+        if (!acctExists) {
           try {
             const parentAcct = await prisma.account.findUnique({ where: { id: data.parentAccountId } });
             if (parentAcct) {
-              const children = await prisma.account.findMany({
-                where: { parentId: parentAcct.id },
-                select: { code: true },
-                orderBy: { code: 'asc' },
-              });
-              let nextSeq = 1;
-              if (children.length > 0) {
-                const nums = children.map(c => {
-                  const suffix = c.code.slice(parentAcct.code.length + 1);
-                  return parseInt(suffix, 10) || 0;
+              let ledgerCode = ledgerCodeToUse;
+              if (!ledgerCode) {
+                const children = await prisma.account.findMany({
+                  where: { parentId: parentAcct.id },
+                  select: { code: true },
+                  orderBy: { code: 'asc' },
                 });
-                nextSeq = Math.max(...nums) + 1;
+                let nextSeq = 1;
+                if (children.length > 0) {
+                  const nums = children.map(c => {
+                    const suffix = c.code.slice(parentAcct.code.length + 1);
+                    return parseInt(suffix, 10) || 0;
+                  });
+                  nextSeq = Math.max(...nums) + 1;
+                }
+                let padding = 4;
+                if (children.length > 0) {
+                  const lastSuffix = children[children.length - 1].code.slice(parentAcct.code.length + 1);
+                  padding = Math.max(lastSuffix.length, 2);
+                }
+                ledgerCode = `${parentAcct.code}-${String(nextSeq).padStart(padding, '0')}`;
               }
-              let padding = 4;
-              if (children.length > 0) {
-                const lastSuffix = children[children.length - 1].code.slice(parentAcct.code.length + 1);
-                padding = Math.max(lastSuffix.length, 2);
-              }
-              const ledgerCode = `${parentAcct.code}-${String(nextSeq).padStart(padding, '0')}`;
               data.ledgerCode = ledgerCode;
 
               await prisma.account.create({
                 data: {
                   code: ledgerCode,
-                  name: data.name || (await prisma.customer.findUnique({ where: { id: req.params.id } }))?.name || 'Customer Account',
+                  name: data.name || existing?.name || 'Customer Account',
+                  nameAr: data.nameAr || null,
                   type: parentAcct.type,
                   subType: 'LEDGER',
                   parentId: parentAcct.id,
                   isActive: true,
+                  openingBalance: 0,
+                  currentBalance: 0,
                 },
               });
             }
           } catch (acctErr: any) {
-            if (acctErr.code !== 'P2002') {
-              console.error('Failed to auto-create ledger account:', acctErr.message);
-            }
+            console.error('Failed to auto-create ledger account:', acctErr.message);
           }
         }
       }
