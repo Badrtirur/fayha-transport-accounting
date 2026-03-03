@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
     LayoutDashboard,
@@ -46,7 +46,7 @@ import {
     BookOpen,
     Wallet
 } from 'lucide-react';
-import { clearAuth } from '../services/api';
+import { clearAuth, dashboardApi } from '../services/api';
 
 interface NavChildItem {
     name: string;
@@ -72,8 +72,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [notificationsOpen, setNotificationsOpen] = useState(false);
+    const [notifications, setNotifications] = useState<{ id: string; title: string; time: string; type: string }[]>([]);
     const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
     const location = useLocation();
+
+    useEffect(() => {
+        dashboardApi.getNotifications()
+            .then(data => setNotifications(Array.isArray(data) ? data : []))
+            .catch(() => setNotifications([]));
+    }, []);
 
     const toggleSubMenu = (name: string) => {
         setExpandedMenus((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -146,14 +153,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
         },
         { name: 'Report', href: '/report', icon: PieChart },
         { name: 'Display', href: '/display', icon: Monitor },
-    ];
-
-    const notifications = [
-        { id: 1, title: 'Invoice INV-2024-015 is overdue', time: '5 min ago', type: 'warning' },
-        { id: 2, title: 'New job JOB-2024-089 created', time: '1 hour ago', type: 'info' },
-        { id: 3, title: 'Payment of SAR 45,000 received', time: '2 hours ago', type: 'success' },
-        { id: 4, title: 'Truck KSA-1234 needs maintenance', time: '3 hours ago', type: 'danger' },
-        { id: 5, title: 'Monthly report is ready', time: '5 hours ago', type: 'info' },
     ];
 
     const getPageTitle = () => {
@@ -435,7 +434,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
                                     className="relative p-2.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                                 >
                                     <Bell className="h-5 w-5" />
-                                    <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white animate-pulse" />
+                                    {notifications.length > 0 && <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white animate-pulse" />}
                                 </button>
 
                                 {/* Notifications Dropdown */}
@@ -443,28 +442,30 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
                                     <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-2xl shadow-elevated border border-slate-200/80 overflow-hidden animate-fade-in-down z-50">
                                         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                                             <h3 className="font-bold text-slate-900">Notifications</h3>
-                                            <span className="badge-danger">5 New</span>
+                                            {notifications.length > 0 && <span className="badge-danger">{notifications.length} New</span>}
                                         </div>
                                         <div className="max-h-80 overflow-y-auto">
-                                            {notifications.map((n) => (
-                                                <div key={n.id} className="px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer border-b border-slate-50 last:border-0">
-                                                    <div className="flex items-start gap-3">
-                                                        <div className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${n.type === 'warning' ? 'bg-amber-400' :
-                                                            n.type === 'success' ? 'bg-emerald-400' :
-                                                                n.type === 'danger' ? 'bg-red-400' : 'bg-blue-400'
-                                                            }`} />
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-sm text-slate-700 font-medium">{n.title}</p>
-                                                            <p className="text-xs text-slate-400 mt-0.5">{n.time}</p>
+                                            {notifications.length === 0 ? (
+                                                <div className="px-4 py-8 text-center">
+                                                    <Bell className="h-8 w-8 text-slate-200 mx-auto mb-2" />
+                                                    <p className="text-sm text-slate-400">No notifications</p>
+                                                </div>
+                                            ) : (
+                                                notifications.slice(0, 10).map((n) => (
+                                                    <div key={n.id} className="px-4 py-3 hover:bg-slate-50 transition-colors cursor-pointer border-b border-slate-50 last:border-0">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${n.type === 'warning' ? 'bg-amber-400' :
+                                                                n.type === 'success' ? 'bg-emerald-400' :
+                                                                    n.type === 'danger' ? 'bg-red-400' : 'bg-blue-400'
+                                                                }`} />
+                                                            <div className="flex-1 min-w-0">
+                                                                <p className="text-sm text-slate-700 font-medium">{n.title}</p>
+                                                                <p className="text-xs text-slate-400 mt-0.5">{n.time}</p>
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        <div className="p-3 border-t border-slate-100 bg-slate-50/50">
-                                            <button className="w-full text-center text-sm font-semibold text-emerald-600 hover:text-emerald-700 py-1.5 rounded-lg hover:bg-emerald-50 transition-colors">
-                                                View All Notifications
-                                            </button>
+                                                ))
+                                            )}
                                         </div>
                                     </div>
                                 )}

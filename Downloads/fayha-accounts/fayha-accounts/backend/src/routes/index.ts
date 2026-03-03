@@ -68,6 +68,7 @@ router.post('/auth/refresh', authController.refreshToken);
 router.get('/dashboard/summary', authenticate, dashboardController.getSummary);
 router.get('/dashboard/balance-sheet', authenticate, dashboardController.getBalanceSheet);
 router.get('/dashboard/income-statement', authenticate, dashboardController.getIncomeStatement);
+router.get('/dashboard/notifications', authenticate, dashboardController.getNotifications);
 
 // ==================== CHART OF ACCOUNTS ====================
 router.get('/accounts', authenticate, accountController.getAll);

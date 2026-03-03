@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   BarChart3,
   TrendingUp,
@@ -12,7 +11,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { dashboardApi, accountingApi } from '../../services/api';
+import { dashboardApi, accountingApi, invoicesApi, billsApi } from '../../services/api';
 
 interface ReportCard {
   id: string;
@@ -61,16 +60,32 @@ const reportCards: ReportCard[] = [
   {
     id: 'collection-report',
     title: 'Collection Report',
-    description: 'Payment collection tracking and outstanding balance analysis.',
+    description: 'Accounts payable aging analysis and outstanding vendor balances.',
     icon: DollarSign,
     gradient: 'from-rose-500 to-rose-700',
   },
 ];
 
+const fmtNum = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const downloadCsv = (filename: string, csvContent: string) => {
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
 const ReportPage: React.FC = () => {
-  const navigate = useNavigate();
-  const [dateFrom, setDateFrom] = useState('2026-01-01');
-  const [dateTo, setDateTo] = useState('2026-02-06');
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-01-01`;
+  });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [generating, setGenerating] = useState<string | null>(null);
 
   const handleGenerate = async (reportId: string) => {
@@ -78,37 +93,158 @@ const ReportPage: React.FC = () => {
     try {
       switch (reportId) {
         case 'financial-summary': {
-          await dashboardApi.getSummary();
-          toast.success('Financial summary generated');
-          navigate('/dashboard');
+          const data = await dashboardApi.getSummary();
+          const rows = [
+            ['Financial Summary Report'],
+            [`Period: ${dateFrom} to ${dateTo}`],
+            [''],
+            ['Metric', 'Amount (SAR)'],
+            ['Total Revenue', fmtNum(data.totalRevenue || 0)],
+            ['Total Expenses', fmtNum(data.totalExpenses || 0)],
+            ['Net Income', fmtNum(data.netIncome || 0)],
+            [''],
+            ['Outstanding Receivable', fmtNum(data.totalReceivable || 0)],
+            ['Outstanding Payable', fmtNum(data.totalPayable || 0)],
+            ['Total Bank Balance', fmtNum(data.totalBankBalance || 0)],
+            [''],
+            ['Unpaid Invoices', String(data.unpaidInvoices || 0)],
+            ['Unpaid Bills', String(data.unpaidBills || 0)],
+          ];
+          if (data.bankBalances?.length > 0) {
+            rows.push([''], ['Bank Account', 'Balance (SAR)']);
+            data.bankBalances.forEach((b: any) => {
+              rows.push([b.bankName || b.code, fmtNum(Number(b.currentBalance || 0))]);
+            });
+          }
+          downloadCsv(`financial-summary-${dateTo}.csv`, rows.map(r => r.map(escapeCsv).join(',')).join('\n'));
+          toast.success('Financial Summary downloaded');
           break;
         }
         case 'profit-loss': {
-          await dashboardApi.getIncomeStatement();
-          toast.success('Profit & Loss report generated');
-          navigate('/dashboard');
+          const data = await dashboardApi.getIncomeStatement();
+          const rows = [
+            ['Profit & Loss Statement'],
+            [`Period: ${dateFrom} to ${dateTo}`],
+            [''],
+            ['Code', 'Account Name', 'Type', 'Amount (SAR)'],
+          ];
+          rows.push(['', '--- REVENUE ---', '', '']);
+          (data.revenue || []).forEach((a: any) => {
+            rows.push([a.accountCode, a.accountName, a.subType || 'Revenue', fmtNum(a.balance || 0)]);
+          });
+          rows.push(['', 'Total Revenue', '', fmtNum(data.totalRevenue || 0)]);
+          rows.push(['']);
+          rows.push(['', '--- EXPENSES ---', '', '']);
+          (data.expenses || []).forEach((a: any) => {
+            rows.push([a.accountCode, a.accountName, a.subType || 'Expense', fmtNum(a.balance || 0)]);
+          });
+          rows.push(['', 'Total Expenses', '', fmtNum(data.totalExpenses || 0)]);
+          rows.push(['']);
+          rows.push(['', 'NET INCOME', '', fmtNum(data.netIncome || 0)]);
+          rows.push(['', 'Profit Margin', '', `${(data.profitMargin || 0).toFixed(1)}%`]);
+          downloadCsv(`profit-loss-${dateTo}.csv`, rows.map(r => r.map(escapeCsv).join(',')).join('\n'));
+          toast.success('Profit & Loss report downloaded');
           break;
         }
         case 'balance-sheet': {
-          await dashboardApi.getBalanceSheet();
-          toast.success('Balance Sheet report generated');
-          navigate('/dashboard');
+          const data = await dashboardApi.getBalanceSheet();
+          const rows = [
+            ['Balance Sheet'],
+            [`As of: ${dateTo}`],
+            [''],
+            ['Code', 'Account Name', 'Type', 'Balance (SAR)'],
+          ];
+          rows.push(['', '--- ASSETS ---', '', '']);
+          (data.assets || []).forEach((a: any) => {
+            rows.push([a.accountCode, a.accountName, a.subType || 'Asset', fmtNum(a.balance || 0)]);
+          });
+          rows.push(['', 'Total Assets', '', fmtNum(data.totalAssets || 0)]);
+          rows.push(['']);
+          rows.push(['', '--- LIABILITIES ---', '', '']);
+          (data.liabilities || []).forEach((a: any) => {
+            rows.push([a.accountCode, a.accountName, a.subType || 'Liability', fmtNum(a.balance || 0)]);
+          });
+          rows.push(['', 'Total Liabilities', '', fmtNum(data.totalLiabilities || 0)]);
+          rows.push(['']);
+          rows.push(['', '--- EQUITY ---', '', '']);
+          (data.equity || []).forEach((a: any) => {
+            rows.push([a.accountCode, a.accountName, a.subType || 'Equity', fmtNum(a.balance || 0)]);
+          });
+          rows.push(['', 'Net Income (Retained)', '', fmtNum(data.netIncome || 0)]);
+          rows.push(['', 'Total Equity', '', fmtNum(data.totalEquity || 0)]);
+          rows.push(['']);
+          rows.push(['', 'Total Liabilities + Equity', '', fmtNum((data.totalLiabilities || 0) + (data.totalEquity || 0))]);
+          downloadCsv(`balance-sheet-${dateTo}.csv`, rows.map(r => r.map(escapeCsv).join(',')).join('\n'));
+          toast.success('Balance Sheet report downloaded');
           break;
         }
         case 'trial-balance': {
-          await accountingApi.getTrialBalance();
-          toast.success('Trial Balance report generated');
-          navigate('/accounting/trial-balance');
+          const data = await accountingApi.getTrialBalance();
+          const accounts = Array.isArray(data) ? data : (data.accounts || []);
+          const rows = [
+            ['Trial Balance'],
+            [`As of: ${dateTo}`],
+            [''],
+            ['Code', 'Account Name', 'Type', 'Debit (SAR)', 'Credit (SAR)'],
+          ];
+          accounts.forEach((a: any) => {
+            rows.push([a.accountCode, a.accountName, a.accountType || '', fmtNum(a.debit || 0), fmtNum(a.credit || 0)]);
+          });
+          rows.push(['']);
+          rows.push(['', 'TOTALS', '', fmtNum(data.totalDebits || 0), fmtNum(data.totalCredits || 0)]);
+          rows.push(['', `Balanced: ${data.isBalanced ? 'YES' : 'NO'}`, '', '', '']);
+          downloadCsv(`trial-balance-${dateTo}.csv`, rows.map(r => r.map(escapeCsv).join(',')).join('\n'));
+          toast.success('Trial Balance report downloaded');
           break;
         }
         case 'aging-report': {
-          toast.success('Aging report generated');
-          navigate('/dashboard');
+          const data = await invoicesApi.getAging();
+          const items = Array.isArray(data) ? data : [];
+          const rows = [
+            ['Accounts Receivable Aging Report'],
+            [`As of: ${dateTo}`],
+            [''],
+            ['Customer Code', 'Customer Name', 'Current (SAR)', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days', 'Total (SAR)'],
+          ];
+          let grandTotal = 0;
+          items.forEach((item: any) => {
+            const b = item.buckets || item;
+            rows.push([
+              item.code || '', item.name || '',
+              fmtNum(b.current || 0), fmtNum(b.days30 || 0), fmtNum(b.days60 || 0),
+              fmtNum(b.days90 || 0), fmtNum(b.over120 || 0), fmtNum(b.total || 0),
+            ]);
+            grandTotal += (b.total || 0);
+          });
+          rows.push(['']);
+          rows.push(['', 'GRAND TOTAL', '', '', '', '', '', fmtNum(grandTotal)]);
+          downloadCsv(`aging-report-ar-${dateTo}.csv`, rows.map(r => r.map(escapeCsv).join(',')).join('\n'));
+          toast.success('AR Aging Report downloaded');
           break;
         }
         case 'collection-report': {
-          toast.success('Collection report generated');
-          navigate('/accounting/payments');
+          const data = await billsApi.getAging();
+          const items = Array.isArray(data) ? data : [];
+          const rows = [
+            ['Accounts Payable Aging Report'],
+            [`As of: ${dateTo}`],
+            [''],
+            ['Vendor Code', 'Vendor Name', 'Current (SAR)', '1-30 Days', '31-60 Days', '61-90 Days', '90+ Days', 'Total (SAR)'],
+          ];
+          let grandTotal = 0;
+          items.forEach((item: any) => {
+            const b = item.buckets || item;
+            rows.push([
+              item.code || '', item.name || '',
+              fmtNum(b.current || 0), fmtNum(b.days30 || 0), fmtNum(b.days60 || 0),
+              fmtNum(b.days90 || 0), fmtNum(b.over120 || 0), fmtNum(b.total || 0),
+            ]);
+            grandTotal += (b.total || 0);
+          });
+          rows.push(['']);
+          rows.push(['', 'GRAND TOTAL', '', '', '', '', '', fmtNum(grandTotal)]);
+          downloadCsv(`aging-report-ap-${dateTo}.csv`, rows.map(r => r.map(escapeCsv).join(',')).join('\n'));
+          toast.success('AP Aging Report downloaded');
           break;
         }
         default:

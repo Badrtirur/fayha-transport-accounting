@@ -742,6 +742,95 @@ export const dashboardController = {
     } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
   },
 
+  async getNotifications(req: AuthRequest, res: Response) {
+    try {
+      const logs = await prisma.auditLog.findMany({
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        include: { user: { select: { firstName: true, lastName: true } } },
+      });
+
+      // Also fetch overdue invoices and bills for warning notifications
+      const [overdueInvoices, overdueBills] = await Promise.all([
+        prisma.invoice.findMany({
+          where: { status: 'OVERDUE' },
+          select: { id: true, invoiceNumber: true, balanceDue: true, customer: { select: { name: true } } },
+          take: 5,
+          orderBy: { dueDate: 'asc' },
+        }),
+        prisma.bill.findMany({
+          where: { status: 'OVERDUE' },
+          select: { id: true, billNumber: true, balanceDue: true, vendor: { select: { name: true } } },
+          take: 5,
+          orderBy: { dueDate: 'asc' },
+        }),
+      ]);
+
+      const notifications: any[] = [];
+
+      // Add overdue invoice warnings
+      overdueInvoices.forEach(inv => {
+        notifications.push({
+          id: `oi-${inv.id}`,
+          title: `Invoice ${inv.invoiceNumber || 'N/A'} is overdue (${inv.customer?.name || 'Unknown'})`,
+          time: 'Overdue',
+          type: 'warning',
+        });
+      });
+
+      // Add overdue bill warnings
+      overdueBills.forEach(bill => {
+        notifications.push({
+          id: `ob-${bill.id}`,
+          title: `Bill ${bill.billNumber || 'N/A'} is overdue (${bill.vendor?.name || 'Unknown'})`,
+          time: 'Overdue',
+          type: 'danger',
+        });
+      });
+
+      // Convert audit logs to notifications
+      const now = Date.now();
+      logs.forEach(log => {
+        const diffMs = now - new Date(log.createdAt).getTime();
+        const diffMin = Math.floor(diffMs / 60000);
+        const diffHr = Math.floor(diffMin / 60);
+        const diffDay = Math.floor(diffHr / 24);
+        let time = '';
+        if (diffMin < 1) time = 'Just now';
+        else if (diffMin < 60) time = `${diffMin} min ago`;
+        else if (diffHr < 24) time = `${diffHr}h ago`;
+        else time = `${diffDay}d ago`;
+
+        const user = log.user ? `${log.user.firstName || ''} ${log.user.lastName || ''}`.trim() : '';
+        const entity = log.entityType?.replace(/([A-Z])/g, ' $1').trim() || 'Record';
+        let title = '';
+        let type = 'info';
+
+        switch (log.action) {
+          case 'CREATE':
+            title = `${entity} created${user ? ` by ${user}` : ''}`;
+            type = 'success';
+            break;
+          case 'POST':
+            title = `${entity} posted${user ? ` by ${user}` : ''}`;
+            type = 'success';
+            break;
+          case 'DELETE':
+            title = `${entity} deleted${user ? ` by ${user}` : ''}`;
+            type = 'danger';
+            break;
+          default:
+            title = `${entity} ${log.action.toLowerCase()}${user ? ` by ${user}` : ''}`;
+            type = 'info';
+        }
+
+        notifications.push({ id: log.id, title, time, type });
+      });
+
+      res.json({ success: true, data: notifications });
+    } catch (error: any) { res.status(500).json({ success: false, error: error.message }); }
+  },
+
   async getIncomeStatement(req: AuthRequest, res: Response) {
     try {
       const accounts = await prisma.account.findMany({

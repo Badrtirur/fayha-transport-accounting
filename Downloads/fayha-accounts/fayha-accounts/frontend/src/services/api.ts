@@ -460,6 +460,8 @@ export const dashboardApi = {
   getBalanceSheet: () => apiFetch<any>('/dashboard/balance-sheet'),
   /** Get the income statement (P&L) report. */
   getIncomeStatement: () => apiFetch<any>('/dashboard/income-statement'),
+  /** Get real notifications (audit log + overdue items). */
+  getNotifications: () => apiFetch<any[]>('/dashboard/notifications'),
 };
 
 // ==================== ACCOUNTING REPORTS ====================
