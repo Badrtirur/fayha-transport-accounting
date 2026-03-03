@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Download, Upload, Search, SlidersHorizontal } from 'lucide-react';
+import { Plus, Download, Upload, Search } from 'lucide-react';
 
 interface PageHeaderProps {
     title: string;
@@ -10,6 +10,8 @@ interface PageHeaderProps {
     addLabel?: string;
     addClassName?: string;
     showSearch?: boolean;
+    searchValue?: string;
+    onSearchChange?: (value: string) => void;
     children?: React.ReactNode;
 }
 
@@ -22,6 +24,8 @@ const PageHeader: React.FC<PageHeaderProps> = ({
     addLabel = 'Add New',
     addClassName = '',
     showSearch = true,
+    searchValue,
+    onSearchChange,
     children
 }) => {
     return (
@@ -66,12 +70,10 @@ const PageHeader: React.FC<PageHeaderProps> = ({
                             type="text"
                             placeholder={`Search ${title.toLowerCase()}...`}
                             className="input-premium pl-10"
+                            value={searchValue ?? ''}
+                            onChange={(e) => onSearchChange?.(e.target.value)}
                         />
                     </div>
-                    <button className="btn-secondary">
-                        <SlidersHorizontal className="h-4 w-4" />
-                        Filters
-                    </button>
                 </div>
             )}
 

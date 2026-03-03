@@ -30,8 +30,8 @@ interface BankTransaction {
   party?: string;
 }
 
-// GL account codes that represent bank/cash accounts
-const BANK_CODES = ['1000', '1010', '1011', '1012', '1013', '1014', '1015'];
+// Default GL account codes for bank/cash - dynamically updated from loaded bank accounts
+const DEFAULT_BANK_CODES = ['1000', '1010', '1011', '1012', '1013', '1014', '1015'];
 
 const BankReconciliation: React.FC = () => {
   const [banks, setBanks] = useState<BankAccount[]>([]);
@@ -58,7 +58,7 @@ const BankReconciliation: React.FC = () => {
         // Merge GL bank accounts if they aren't in the banks list
         const glBanks = acctList.filter((a: any) => {
           const st = (a.subType || a.sub || a.subtype || '').toUpperCase();
-          return BANK_CODES.includes(a.code) || st === 'BANK';
+          return DEFAULT_BANK_CODES.includes(a.code) || st === 'BANK';
         });
 
         // Combine: use real bank accounts first, then fill from GL accounts
@@ -136,15 +136,15 @@ const BankReconciliation: React.FC = () => {
             const cr = Number(line.cr || line.credit || 0);
             if (dr === 0 && cr === 0) continue;
 
-            const isCredit = dr > 0; // Debit to bank = money IN (credit to the bank's perspective)
+            const isMoneyIn = dr > 0; // GL debit to bank account = money IN
 
             bankTxns.push({
               id: `jnl-${journal.id || journal._id}-${line.acc}-${Math.random().toString(36).slice(2, 6)}`,
               transactionDate: journal.date || journal.createdAt || new Date().toISOString(),
               description: line.desc || line.description || journal.desc || journal.description || '—',
               reference: ref,
-              type: isCredit ? 'CREDIT' : 'DEBIT',
-              amount: isCredit ? dr : cr,
+              type: isMoneyIn ? 'CREDIT' : 'DEBIT',
+              amount: isMoneyIn ? dr : cr,
               runningBalance: 0, // will be computed below
               reconciliationStatus: 'UNRECONCILED',
               source: 'journal',

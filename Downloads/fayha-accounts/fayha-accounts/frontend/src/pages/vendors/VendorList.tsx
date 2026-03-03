@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import Modal from '../../components/common/Modal';
 import Pagination from '../../components/common/Pagination';
@@ -73,13 +74,28 @@ const typeConfig: Record<string, { icon: any; bg: string; text: string }> = {
 };
 
 const VendorList: React.FC = () => {
+    const navigate = useNavigate();
     const [vendors, setVendors] = useState<Vendor[]>([]);
     const [loading, setLoading] = useState(true);
     const [currentPage, setCurrentPage] = useState(1);
     const [modalOpen, setModalOpen] = useState(false);
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
     const [form, setForm] = useState(emptyForm);
+    const [searchTerm, setSearchTerm] = useState('');
     const itemsPerPage = 8;
+
+    const filteredVendors = useMemo(() => {
+        if (!searchTerm.trim()) return vendors;
+        const q = searchTerm.toLowerCase();
+        return vendors.filter(v =>
+            v.name?.toLowerCase().includes(q) ||
+            v.email?.toLowerCase().includes(q) ||
+            v.phone?.includes(q) ||
+            v.city?.toLowerCase().includes(q) ||
+            v.contactPerson?.toLowerCase().includes(q) ||
+            (v.category || v.type || '').toLowerCase().includes(q)
+        );
+    }, [vendors, searchTerm]);
 
     const fetchVendors = async () => {
         try {
@@ -212,14 +228,14 @@ const VendorList: React.FC = () => {
         input.click();
     };
 
-    const paginatedVendors = vendors.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    const paginatedVendors = filteredVendors.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
     const totalPayable = vendors.reduce((s, v) => s + (v.balance || 0), 0);
     const govCount = vendors.filter(v => (v.vendorType || v.type) === 'Government').length;
     const transporterCount = vendors.filter(v => (v.vendorType || v.type) === 'Transporter').length;
 
     return (
         <div className="space-y-6">
-            <PageHeader title="Vendors" subtitle="Manage suppliers, transporters, and government bodies." onAdd={handleOpenAdd} onExport={handleExport} onImport={handleImport} addLabel="Add Vendor" />
+            <PageHeader title="Vendors" subtitle="Manage suppliers, transporters, and government bodies." onAdd={handleOpenAdd} onExport={handleExport} onImport={handleImport} addLabel="Add Vendor" searchValue={searchTerm} onSearchChange={(v) => { setSearchTerm(v); setCurrentPage(1); }} />
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-2xl p-4 shadow-card border border-slate-100/80 flex items-center gap-3">
@@ -263,13 +279,13 @@ const VendorList: React.FC = () => {
                                     <td className="text-center"><span className="font-bold text-sm text-slate-900">{vendor.totalBills || 0}</span></td>
                                     <td className="text-right"><span className={`font-bold text-sm ${(vendor.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>SAR {(vendor.balance || 0).toLocaleString()}</span></td>
                                     <td className="text-center"><span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${vendor.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}><span className={`h-1.5 w-1.5 rounded-full ${vendor.status === 'Active' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{vendor.status}</span></td>
-                                    <td className="text-center"><div className="flex items-center justify-center gap-1"><button className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="View"><Eye className="h-4 w-4" /></button><button onClick={() => handleOpenEdit(vendor)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Edit"><Edit2 className="h-4 w-4" /></button><button onClick={() => handleDelete(vendor)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Delete"><Trash2 className="h-4 w-4" /></button></div></td>
+                                    <td className="text-center"><div className="flex items-center justify-center gap-1"><button onClick={() => navigate(`/vendors/${vendor._id || vendor.id}`)} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="View"><Eye className="h-4 w-4" /></button><button onClick={() => handleOpenEdit(vendor)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Edit"><Edit2 className="h-4 w-4" /></button><button onClick={() => handleDelete(vendor)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Delete"><Trash2 className="h-4 w-4" /></button></div></td>
                                 </tr>
                             );
                         })}
                     </tbody>
                 </table>
-                <Pagination currentPage={currentPage} totalPages={Math.ceil(vendors.length / itemsPerPage)} onPageChange={setCurrentPage} itemsPerPage={itemsPerPage} totalItems={vendors.length} />
+                <Pagination currentPage={currentPage} totalPages={Math.ceil(filteredVendors.length / itemsPerPage)} onPageChange={setCurrentPage} itemsPerPage={itemsPerPage} totalItems={filteredVendors.length} />
                 </>
                 )}
             </div>

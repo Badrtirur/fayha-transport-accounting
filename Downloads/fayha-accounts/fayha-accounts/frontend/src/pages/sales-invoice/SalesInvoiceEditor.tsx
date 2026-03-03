@@ -345,6 +345,11 @@ const SalesInvoiceEditor: React.FC = () => {
       toast.error('Please add at least one service item.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
       return false;
     }
+    const hasEmptyName = items.some(item => !item.name || !item.name.trim());
+    if (hasEmptyName) {
+      toast.error('All items must have a name/description.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
+      return false;
+    }
     const hasZeroAmount = items.some(item => !item.amount || item.amount <= 0);
     if (hasZeroAmount) {
       toast.error('All items must have an amount greater than zero.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });

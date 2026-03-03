@@ -75,24 +75,28 @@ const FileVerificationList: React.FC = () => {
     }
   };
 
-  const handleApprove = (fv: FileVerification) => {
-    const updateData = { status: 'Verified' as const, verifiedBy: 'Current User', verifiedAt: new Date().toISOString() };
-    fileVerificationsApi.update(fv.id, updateData).then((updated) => {
+  const handleApprove = async (fv: FileVerification) => {
+    try {
+      const userName = JSON.parse(localStorage.getItem('user') || '{}')?.name || 'System';
+      const updateData = { status: 'Verified' as const, verifiedBy: userName, verifiedAt: new Date().toISOString() };
+      const updated = await fileVerificationsApi.update(fv.id, updateData);
       setVerifications((prev) => prev.map((v) => (v.id === fv.id ? updated : v)));
-      toast.success(`${fv.fileName} approved successfully!`, {
-        style: { borderRadius: '12px', background: '#10b981', color: '#fff' },
-      });
-    });
+      toast.success(`${fv.fileName} approved successfully!`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to approve file.');
+    }
   };
 
-  const handleReject = (fv: FileVerification) => {
-    const updateData = { status: 'Rejected' as const, verifiedBy: 'Current User', verifiedAt: new Date().toISOString() };
-    fileVerificationsApi.update(fv.id, updateData).then((updated) => {
+  const handleReject = async (fv: FileVerification) => {
+    try {
+      const userName = JSON.parse(localStorage.getItem('user') || '{}')?.name || 'System';
+      const updateData = { status: 'Rejected' as const, verifiedBy: userName, verifiedAt: new Date().toISOString() };
+      const updated = await fileVerificationsApi.update(fv.id, updateData);
       setVerifications((prev) => prev.map((v) => (v.id === fv.id ? updated : v)));
-      toast.success(`${fv.fileName} rejected.`, {
-        style: { borderRadius: '12px', background: '#ef4444', color: '#fff' },
-      });
-    });
+      toast.success(`${fv.fileName} rejected.`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to reject file.');
+    }
   };
 
   const getJobRefNo = (jobRefId: string): string => {

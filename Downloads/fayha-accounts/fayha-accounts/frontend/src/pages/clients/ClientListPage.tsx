@@ -136,9 +136,23 @@ const ClientListPage: React.FC = () => {
   };
 
   const handleSaveClient = async () => {
-    if (!form.name) {
-      toast.error('Please enter a client name.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
-      return;
+    if (!form.name.trim()) {
+      toast.error('Client name is required.'); return;
+    }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      toast.error('Please enter a valid email address.'); return;
+    }
+    if (form.phone && !/^[+\d\s()-]{7,20}$/.test(form.phone)) {
+      toast.error('Please enter a valid phone number.'); return;
+    }
+    if (form.contactPersonPhone && !/^[+\d\s()-]{7,20}$/.test(form.contactPersonPhone)) {
+      toast.error('Please enter a valid contact person phone number.'); return;
+    }
+    if (form.vatNumber && !/^\d{15}$/.test(form.vatNumber.replace(/\s/g, ''))) {
+      toast.error('VAT number must be 15 digits.'); return;
+    }
+    if (form.crNumber && !/^\d{10}$/.test(form.crNumber.replace(/\s/g, ''))) {
+      toast.error('CR number must be 10 digits.'); return;
     }
     setSaving(true);
     try {
@@ -356,7 +370,17 @@ const ClientListPage: React.FC = () => {
             <Upload className="h-4 w-4" />
             {importLoading ? 'Importing...' : 'Import'}
           </button>
-          <button onClick={() => toast('Exporting to Excel...', { icon: '\ud83d\udcca', style: { borderRadius: '12px', background: '#3b82f6', color: '#fff' } })} className="bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 inline-flex items-center gap-2 transition-colors">
+          <button onClick={() => {
+            if (filtered.length === 0) { toast.error('No clients to export'); return; }
+            const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const headers = ['Name','Name (Arabic)','CR Number','VAT Number','City','Phone','Email','Contact Person','Status'];
+            const rows = filtered.map((c: any) => [c.name, c.nameAr, c.crNumber, c.vatNumber, c.city, c.phone, c.email, c.contactPerson, c.isActive === false ? 'Inactive' : 'Active'].map(esc).join(','));
+            const csv = [headers.join(','), ...rows].join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `clients-export-${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url);
+            toast.success('Clients exported successfully');
+          }} className="bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 inline-flex items-center gap-2 transition-colors">
             <Download className="h-4 w-4" />
             Export
           </button>

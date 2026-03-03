@@ -156,23 +156,20 @@ const Dashboard: React.FC = () => {
         return result;
     }, [incomeStatement]);
 
-    // Monthly revenue chart data from income statement
+    // Monthly revenue chart data — evenly distributed across months
     const monthlyData = useMemo(() => {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const currentMonth = new Date().getMonth();
-        // Generate approximate monthly distribution
         const totalRev = summary?.totalRevenue || 0;
         const totalExp = summary?.totalExpenses || 0;
-        return months.slice(0, currentMonth + 1).map((m) => {
-            const factor = 0.7 + Math.random() * 0.6;
-            const avgRev = totalRev / (currentMonth + 1);
-            const avgExp = totalExp / (currentMonth + 1);
-            return {
-                month: m,
-                revenue: Math.round(avgRev * factor),
-                expenses: Math.round(avgExp * factor),
-            };
-        });
+        const count = currentMonth + 1;
+        const avgRev = totalRev / count;
+        const avgExp = totalExp / count;
+        return months.slice(0, count).map((m) => ({
+            month: m,
+            revenue: Math.round(avgRev),
+            expenses: Math.round(avgExp),
+        }));
     }, [summary]);
 
     if (loading) {

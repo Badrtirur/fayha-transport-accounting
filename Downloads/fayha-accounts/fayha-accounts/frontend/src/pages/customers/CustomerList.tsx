@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
 import Modal from '../../components/common/Modal';
 import Pagination from '../../components/common/Pagination';
@@ -75,13 +76,28 @@ const emptyForm: {
 };
 
 const CustomerList: React.FC = () => {
+    const navigate = useNavigate();
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [currentPage, setCurrentPage] = useState(1);
     const [modalOpen, setModalOpen] = useState(false);
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
     const [form, setForm] = useState(emptyForm);
+    const [searchTerm, setSearchTerm] = useState('');
     const itemsPerPage = 8;
+
+    const filteredCustomers = useMemo(() => {
+        if (!searchTerm.trim()) return customers;
+        const q = searchTerm.toLowerCase();
+        return customers.filter(c =>
+            c.name?.toLowerCase().includes(q) ||
+            c.email?.toLowerCase().includes(q) ||
+            c.phone?.includes(q) ||
+            c.city?.toLowerCase().includes(q) ||
+            c.vatNumber?.includes(q) ||
+            c.crNumber?.includes(q)
+        );
+    }, [customers, searchTerm]);
 
     const fetchCustomers = async () => {
         try {
@@ -219,14 +235,14 @@ const CustomerList: React.FC = () => {
         input.click();
     };
 
-    const paginatedCustomers = customers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-    const totalBalance = customers.reduce((s, c) => s + (c.balance || 0), 0);
-    const activeCount = customers.filter(c => c.status === 'Active').length;
+    const paginatedCustomers = filteredCustomers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+    const totalBalance = filteredCustomers.reduce((s, c) => s + (c.balance || 0), 0);
+    const activeCount = filteredCustomers.filter(c => c.status === 'Active').length;
     const avgRating = customers.length > 0 ? (customers.reduce((s, c) => s + (c.rating || 0), 0) / customers.length).toFixed(1) : '0.0';
 
     return (
         <div className="space-y-6">
-            <PageHeader title="Customers" subtitle="Manage client profiles, balances, and relationship history." onAdd={handleOpenAdd} onExport={handleExport} onImport={handleImport} addLabel="Add Customer" />
+            <PageHeader title="Customers" subtitle="Manage client profiles, balances, and relationship history." onAdd={handleOpenAdd} onExport={handleExport} onImport={handleImport} addLabel="Add Customer" searchValue={searchTerm} onSearchChange={(v) => { setSearchTerm(v); setCurrentPage(1); }} />
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-2xl p-4 shadow-card border border-slate-100/80 flex items-center gap-3">
@@ -298,7 +314,7 @@ const CustomerList: React.FC = () => {
                                 <p className={`text-lg font-bold ${(customer.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>SAR {(customer.balance || 0).toLocaleString()}</p>
                             </div>
                             <div className="flex items-center gap-1">
-                                <button className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title="View"><Eye className="h-4 w-4" /></button>
+                                <button onClick={() => navigate(`/clients/${customer._id || customer.id}`)} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title="View"><Eye className="h-4 w-4" /></button>
                                 <button onClick={() => handleOpenEdit(customer)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="Edit"><Edit2 className="h-4 w-4" /></button>
                                 <button onClick={() => handleDelete(customer)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all" title="Delete"><Trash2 className="h-4 w-4" /></button>
                             </div>
@@ -308,8 +324,8 @@ const CustomerList: React.FC = () => {
             </div>
             )}
 
-            {customers.length > 0 && (
-                <Pagination currentPage={currentPage} totalPages={Math.ceil(customers.length / itemsPerPage)} onPageChange={setCurrentPage} itemsPerPage={itemsPerPage} totalItems={customers.length} />
+            {filteredCustomers.length > 0 && (
+                <Pagination currentPage={currentPage} totalPages={Math.ceil(filteredCustomers.length / itemsPerPage)} onPageChange={setCurrentPage} itemsPerPage={itemsPerPage} totalItems={filteredCustomers.length} />
             )}
 
             <Modal isOpen={modalOpen} onClose={() => { setModalOpen(false); setEditingCustomer(null); }} title={editingCustomer ? 'Edit Customer' : 'Add New Customer'} size="lg">
