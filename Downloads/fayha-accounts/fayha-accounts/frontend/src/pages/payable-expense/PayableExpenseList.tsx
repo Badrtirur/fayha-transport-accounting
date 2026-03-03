@@ -352,19 +352,6 @@ const PayableExpenseList: React.FC = () => {
           />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5">Job Reference</label>
-          <select
-            value={formData.jobRefId}
-            onChange={(e) => handleFormChange('jobRefId', e.target.value)}
-            className="input-premium"
-          >
-            <option value="">Select job reference...</option>
-            {jobRefs.map((jr) => (
-              <option key={jr.id} value={jr.id}>{(jr as any).jobRefNo || (jr as any).jobNumber || jr.id}</option>
-            ))}
-          </select>
-        </div>
-        <div>
           <label className="block text-sm font-semibold text-slate-700 mb-1.5">Payment Method</label>
           <select
             value={formData.paymentMethod}

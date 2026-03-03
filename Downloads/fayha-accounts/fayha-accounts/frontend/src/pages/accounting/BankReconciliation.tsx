@@ -211,8 +211,8 @@ const BankReconciliation: React.FC = () => {
         selectedIds.has(t.id) ? { ...t, reconciliationStatus: 'RECONCILED' as const } : t
       ));
       setSelectedIds(new Set());
-    } catch (err) {
-      console.error('Reconciliation failed:', err);
+    } catch (err: any) {
+      toast.error(err?.message || 'Reconciliation failed');
     }
   };
 
