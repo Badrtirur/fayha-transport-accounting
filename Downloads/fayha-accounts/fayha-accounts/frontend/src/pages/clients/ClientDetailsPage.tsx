@@ -271,7 +271,7 @@ const ClientDetailsPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => navigate(`/clients/${id}/edit`)}
+            onClick={() => navigate(`/clients?edit=${id}`)}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 rounded-xl transition-all border border-slate-200"
           >
             <Edit3 className="h-4 w-4" />

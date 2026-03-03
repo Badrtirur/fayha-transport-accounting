@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   Plus,
@@ -63,6 +63,7 @@ const emptyForm = {
 
 const ClientListPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -196,6 +197,18 @@ const ClientListPage: React.FC = () => {
       toast.error('Failed to delete client.', { style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
     }
   };
+
+  // Auto-open edit modal when navigated from client details with ?edit=id
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId && clients.length > 0 && !showModal) {
+      const client = clients.find(c => c.id === editId);
+      if (client) {
+        openEditModal(client);
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [clients, searchParams]);
 
   const openEditModal = (client: any) => {
     setEditingClient(client);
