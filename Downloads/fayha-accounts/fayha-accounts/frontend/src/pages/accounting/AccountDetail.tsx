@@ -58,10 +58,12 @@ const AccountDetail: React.FC = () => {
 
       const rawEntries: any[] = Array.isArray(ledgerData) ? ledgerData : (ledgerData?.entries || []);
       let runningBalance = ob;
+      const accType = (acc?.type || '').toUpperCase();
+      const debitNorm = accType === 'ASSET' || accType === 'EXPENSE';
       const mapped = rawEntries.map((e: any) => {
         const debit = Number(e.debitAmount || e.debit || 0);
         const credit = Number(e.creditAmount || e.credit || 0);
-        runningBalance += debit - credit;
+        runningBalance += debitNorm ? (debit - credit) : (credit - debit);
         const je = e.journalEntry || {};
         return {
           ...e,

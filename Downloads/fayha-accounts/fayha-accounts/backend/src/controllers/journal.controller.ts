@@ -155,6 +155,24 @@ export const journalController = {
       if (!entry) return res.status(404).json({ success: false, error: 'Not found' });
       if (entry.status === 'POSTED') return res.status(400).json({ success: false, error: 'Already posted' });
 
+      // Validate debits = credits BEFORE updating balances
+      const totalDebit = entry.lines.reduce((s, l) => s + Number(l.debitAmount || 0), 0);
+      const totalCredit = entry.lines.reduce((s, l) => s + Number(l.creditAmount || 0), 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.01) {
+        return res.status(400).json({ success: false, error: `Cannot post: Debits (${totalDebit}) do not equal Credits (${totalCredit})` });
+      }
+
+      // Validate all accounts have a type
+      for (const line of entry.lines) {
+        const account = await prisma.account.findUnique({ where: { id: line.accountId }, select: { id: true, type: true, code: true } });
+        if (!account) {
+          return res.status(400).json({ success: false, error: `Account not found for line ${line.lineNumber}` });
+        }
+        if (!account.type) {
+          return res.status(400).json({ success: false, error: `Account ${account.code} has no type set. Cannot post.` });
+        }
+      }
+
       // Update account balances
       for (const line of entry.lines) {
         const account = await prisma.account.findUnique({ where: { id: line.accountId } });
@@ -174,13 +192,6 @@ export const journalController = {
           where: { id: line.accountId },
           data: { currentBalance: { increment: balanceChange } }
         });
-      }
-
-      // Re-validate debits = credits before posting
-      const totalDebit = entry.lines.reduce((s, l) => s + Number(l.debitAmount || 0), 0);
-      const totalCredit = entry.lines.reduce((s, l) => s + Number(l.creditAmount || 0), 0);
-      if (Math.abs(totalDebit - totalCredit) > 0.01) {
-        return res.status(400).json({ success: false, error: `Cannot post: Debits (${totalDebit}) do not equal Credits (${totalCredit})` });
       }
 
       const updated = await prisma.journalEntry.update({

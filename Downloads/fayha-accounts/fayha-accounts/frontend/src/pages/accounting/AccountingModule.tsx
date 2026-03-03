@@ -26,13 +26,6 @@ import {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// Fallback mock bank accounts (used when real data from banksApi is unavailable)
-const fallbackBankAccounts = [
-  { id: 'bank-1', name: 'Al Rajhi Bank', code: '1120', balance: 245680.50, lastTx: '2024-12-28', sparkline: [18, 22, 19, 25, 28, 24, 30, 27, 32, 29, 35, 33] },
-  { id: 'bank-2', name: 'SNB (Saudi National Bank)', code: '1130', balance: 128450.00, lastTx: '2024-12-27', sparkline: [12, 15, 14, 18, 16, 20, 22, 19, 24, 21, 23, 25] },
-  { id: 'bank-3', name: 'Riyad Bank', code: '1140', balance: 67200.75, lastTx: '2024-12-26', sparkline: [8, 10, 9, 12, 11, 14, 13, 15, 14, 16, 18, 17] },
-  { id: 'bank-4', name: 'Cash on Hand', code: '1110', balance: 5320.00, lastTx: '2024-12-28', sparkline: [5, 4, 6, 5, 7, 6, 8, 7, 5, 6, 4, 5] },
-];
 
 
 
@@ -1356,8 +1349,7 @@ const BankCashTab: React.FC<{ banks: any[] }> = ({ banks }) => {
     { gradient: 'from-amber-500 to-orange-600', sparkColor: '#fde68a' },
   ];
 
-  // Use real bank data with fallback to mock data
-  const activeBankAccounts = banks.length > 0 ? banks : fallbackBankAccounts;
+  const activeBankAccounts = banks;
   const totalBankCash = activeBankAccounts.reduce((s, b) => s + (b.currentBalance || b.balance || 0), 0);
 
   return (
@@ -1482,10 +1474,9 @@ const AccountingModule: React.FC = () => {
       setBanks(Array.isArray(fetchedBanks) ? fetchedBanks : []);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to load accounting data');
-      // Fallback to extended mock data for demo purposes
       setAccounts([]);
       setJournals([]);
-      setBanks(fallbackBankAccounts);
+      setBanks([]);
     } finally {
       setLoading(false);
     }

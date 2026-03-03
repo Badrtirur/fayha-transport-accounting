@@ -56,10 +56,12 @@ const GeneralLedger: React.FC = () => {
       const rawEntries: any[] = Array.isArray(data) ? data : (data?.entries || []);
       // Calculate running balance starting from opening balance
       let runningBalance = Number(data?.openingBalance || 0);
+      const accType = (acc?.type || '').toUpperCase();
+      const debitNorm = accType === 'ASSET' || accType === 'EXPENSE';
       const withBalance = rawEntries.map((e: any) => {
         const debit = Number(e.debitAmount || e.debit || 0);
         const credit = Number(e.creditAmount || e.credit || 0);
-        runningBalance += debit - credit;
+        runningBalance += debitNorm ? (debit - credit) : (credit - debit);
         // Flatten nested journalEntry fields
         const je = e.journalEntry || {};
         return {
@@ -91,6 +93,19 @@ const GeneralLedger: React.FC = () => {
 
   const totalDebits = entries.reduce((s, e) => s + (e.debit || 0), 0);
   const totalCredits = entries.reduce((s, e) => s + (e.credit || 0), 0);
+  const selAcctDebitNorm = ['ASSET', 'EXPENSE'].includes((selectedAccount?.type || '').toUpperCase());
+  // With type-aware balance: positive = normal direction
+  // For debit-normal: positive → Dr, negative → Cr
+  // For credit-normal: positive → Cr, negative → Dr
+  const balDrCr = (bal: number) => {
+    if (bal === 0) return '';
+    if (selAcctDebitNorm) return bal > 0 ? 'Dr' : 'Cr';
+    return bal > 0 ? 'Cr' : 'Dr';
+  };
+  const balDrCrColor = (bal: number) => {
+    const label = balDrCr(bal);
+    return label === 'Dr' ? 'text-blue-500' : label === 'Cr' ? 'text-rose-500' : '';
+  };
 
   return (
     <div className="space-y-6">
@@ -209,10 +224,10 @@ const GeneralLedger: React.FC = () => {
                   <p className="text-xs text-slate-500">Total Credits</p>
                 </div>
                 <div className="bg-white rounded-xl p-4 shadow-card border border-slate-100/80 text-center">
-                  <p className={`text-lg font-bold ${totalDebits - totalCredits >= 0 ? 'text-slate-900' : 'text-red-600'}`}>
+                  <p className={`text-lg font-bold text-slate-900`}>
                     {totalDebits - totalCredits !== 0 && (
-                      <span className={`text-xs mr-1 ${totalDebits - totalCredits > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
-                        {totalDebits - totalCredits > 0 ? 'Dr' : 'Cr'}
+                      <span className={`text-xs mr-1 ${totalDebits > totalCredits ? 'text-blue-500' : 'text-rose-500'}`}>
+                        {totalDebits > totalCredits ? 'Dr' : 'Cr'}
                       </span>
                     )}
                     SAR {Math.abs(totalDebits - totalCredits).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -259,9 +274,9 @@ const GeneralLedger: React.FC = () => {
                           {entry.credit > 0 ? <span className="text-emerald-700">{(entry.credit || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> : <span className="text-slate-300">-</span>}
                         </td>
                         <td className="py-3 px-4 text-right text-sm font-bold text-slate-900">
-                          {(entry.balance || 0) !== 0 && (
-                            <span className={`text-[10px] font-semibold mr-1 ${(entry.balance || 0) > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
-                              {(entry.balance || 0) > 0 ? 'Dr' : 'Cr'}
+                          {balDrCr(entry.balance || 0) && (
+                            <span className={`text-[10px] font-semibold mr-1 ${balDrCrColor(entry.balance || 0)}`}>
+                              {balDrCr(entry.balance || 0)}
                             </span>
                           )}
                           {Math.abs(entry.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -278,9 +293,9 @@ const GeneralLedger: React.FC = () => {
                         <td className="py-4 px-4 text-right text-base font-bold text-slate-900">
                           {entries.length > 0 ? (
                             <>
-                              {(entries[entries.length - 1].balance || 0) !== 0 && (
-                                <span className={`text-xs mr-1 ${(entries[entries.length - 1].balance || 0) > 0 ? 'text-blue-500' : 'text-rose-500'}`}>
-                                  {(entries[entries.length - 1].balance || 0) > 0 ? 'Dr' : 'Cr'}
+                              {balDrCr(entries[entries.length - 1].balance || 0) && (
+                                <span className={`text-xs mr-1 ${balDrCrColor(entries[entries.length - 1].balance || 0)}`}>
+                                  {balDrCr(entries[entries.length - 1].balance || 0)}
                                 </span>
                               )}
                               {Math.abs(entries[entries.length - 1].balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}

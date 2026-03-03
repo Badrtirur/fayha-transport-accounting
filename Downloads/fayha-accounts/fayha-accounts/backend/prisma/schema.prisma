@@ -512,7 +512,7 @@ model Invoice {
   customer      Customer          @relation(fields: [customerId], references: [id])
   lineItems     InvoiceLineItem[]
   payments      Payment[]         @relation("InvoicePayments")
-  journalEntry  JournalEntry?     @relation(fields: [journalEntryId], references: [id])
+  journalEntry  JournalEntry?     @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   creditNotes   CreditNote[]
 
   @@index([invoiceNumber])
@@ -659,7 +659,7 @@ model Bill {
   vendor        Vendor          @relation(fields: [vendorId], references: [id])
   lineItems     BillLineItem[]
   payments      Payment[]       @relation("BillPayments")
-  journalEntry  JournalEntry?   @relation(fields: [journalEntryId], references: [id])
+  journalEntry  JournalEntry?   @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   debitNotes    DebitNote[]
 
   @@index([billNumber])
@@ -716,7 +716,7 @@ model Payment {
   invoice       Invoice?      @relation("InvoicePayments", fields: [invoiceId], references: [id])
   bill          Bill?         @relation("BillPayments", fields: [billId], references: [id])
   bankAccount   BankAccount?  @relation(fields: [bankAccountId], references: [id])
-  journalEntry  JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  journalEntry  JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   processedBy   User          @relation(fields: [processedById], references: [id])
 
   @@index([paymentNumber])

@@ -254,13 +254,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ onLogout }) => {
                     </button>
                 </div>
 
-                {/* Quick Stats Bar */}
+                {/* System Status */}
                 {!sidebarCollapsed && (
                     <div className="px-4 py-3 border-b border-white/5">
                         <div className="flex items-center gap-2 px-3 py-2 bg-white/5 rounded-xl">
                             <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                             <span className="text-xs text-slate-400">System Online</span>
-                            <span className="ml-auto text-xs text-emerald-400 font-semibold">500+ Users</span>
                         </div>
                     </div>
                 )}
