@@ -120,7 +120,12 @@ const SalesInvoiceEditor: React.FC = () => {
               setTermsName(existing.termsConditionsName || '');
               setTermsContent(existing.termsConditionsContent || '');
               setCategory(existing.category);
-              setItems(existing.items);
+              setItems((existing.items || []).map((it: any) => ({
+                ...it,
+                name: it.name || it.nameEn || '',
+                vatPercent: it.vatPercent ?? (it.vatRate != null ? Math.round(it.vatRate * 100) : 15),
+                total: it.total ?? it.totalAmount ?? 0,
+              })));
               // Load merged services for editing client
               if (existing.clientId) {
                 try {
@@ -371,7 +376,7 @@ const SalesInvoiceEditor: React.FC = () => {
           nameAr: item.nameAr || '',
           description: item.description,
           amount: item.amount,
-          vatRate: (item.vatPercent || 15) / 100,
+          vatRate: (item.vatPercent ?? 15) / 100,
           vatAmount: item.vatAmount,
           totalAmount: item.total,
         })),
@@ -410,7 +415,7 @@ const SalesInvoiceEditor: React.FC = () => {
           nameAr: item.nameAr || '',
           description: item.description,
           amount: item.amount,
-          vatRate: (item.vatPercent || 15) / 100,
+          vatRate: (item.vatPercent ?? 15) / 100,
           vatAmount: item.vatAmount,
           totalAmount: item.total,
         })),
@@ -846,18 +851,18 @@ const SalesInvoiceEditor: React.FC = () => {
 
         {/* Line Items Table */}
         {items.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="table-premium">
+          <div className="overflow-x-auto invoice-items-table">
+            <table className="table-premium" style={{tableLayout:'fixed', width:'100%', minWidth:'1000px'}}>
               <thead>
                 <tr>
-                  <th className="w-[20%]">Name</th>
-                  <th className="w-[20%]">Description</th>
-                  <th className="text-right w-[12%]">Amount</th>
-                  <th className="text-center w-[10%]">Tax VAT?</th>
-                  <th className="text-center w-[10%]">VAT %</th>
-                  <th className="text-right w-[10%]">VAT</th>
-                  <th className="text-right w-[12%]">Total</th>
-                  <th className="text-center w-[6%]">Action</th>
+                  <th style={{width:'12%'}}>Name</th>
+                  <th style={{width:'18%'}}>Description</th>
+                  <th className="text-right" style={{width:'11%'}}>Amount</th>
+                  <th className="text-center" style={{width:'16%'}}>VAT Category</th>
+                  <th className="text-center" style={{width:'11%'}}>VAT %</th>
+                  <th className="text-right" style={{width:'10%'}}>VAT</th>
+                  <th className="text-right" style={{width:'12%'}}>Total</th>
+                  <th className="text-center" style={{width:'4%'}}></th>
                 </tr>
               </thead>
               <tbody>
@@ -865,11 +870,11 @@ const SalesInvoiceEditor: React.FC = () => {
                   <tr key={item.id} className="group">
                     <td>
                       <div>
-                        <span className="text-sm font-semibold text-slate-900 block">
+                        <span className="text-sm font-semibold text-slate-900 block truncate">
                           {item.name}
                         </span>
                         {item.nameAr && (
-                          <span className="text-xs text-slate-400" dir="rtl">
+                          <span className="text-xs text-slate-400 block truncate" dir="rtl">
                             {item.nameAr}
                           </span>
                         )}
@@ -899,10 +904,10 @@ const SalesInvoiceEditor: React.FC = () => {
                       <select
                         value={item.vatPercent > 0 ? 'Yes' : 'No'}
                         onChange={(e) => handleUpdateVat(index, e.target.value === 'Yes')}
-                        className="w-full p-2 text-sm font-semibold border border-slate-200 hover:border-slate-300 focus:border-emerald-500 rounded-lg transition-colors outline-none text-center bg-white"
+                        className={`w-full p-2 text-sm font-semibold border rounded-lg transition-colors outline-none text-center ${item.vatPercent === 0 ? 'border-orange-300 bg-orange-50 text-orange-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
                       >
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
+                        <option value="Yes">Standard (S)</option>
+                        <option value="No">Out of Scope (O)</option>
                       </select>
                     </td>
                     <td className="text-center">
@@ -917,7 +922,7 @@ const SalesInvoiceEditor: React.FC = () => {
                           step="0.5"
                         />
                       ) : (
-                        <span className="text-sm font-semibold text-slate-400">0%</span>
+                        <span className="text-sm font-bold text-orange-500">0%</span>
                       )}
                     </td>
                     <td className="text-right">
@@ -1012,7 +1017,7 @@ const SalesInvoiceEditor: React.FC = () => {
               </span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-slate-100">
-              <span className="text-sm text-slate-500">Total Vat Amount (15%)</span>
+              <span className="text-sm text-slate-500">Total VAT Amount</span>
               <span className="text-sm font-semibold text-amber-700">
                 SAR{' '}
                 {totalVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}

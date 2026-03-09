@@ -144,6 +144,14 @@ body {
     @apply px-6 py-4;
   }
 
+  /* Tighter padding for invoice items table with many columns */
+  .invoice-items-table .table-premium thead th {
+    @apply px-3 py-3 text-sm;
+  }
+  .invoice-items-table .table-premium tbody td {
+    @apply px-3 py-3;
+  }
+
   /* KPI Stat Card */
   .stat-card {
     @apply relative overflow-hidden bg-white rounded-2xl p-6 shadow-card border border-slate-100/80 transition-all duration-300 hover:shadow-card-hover;

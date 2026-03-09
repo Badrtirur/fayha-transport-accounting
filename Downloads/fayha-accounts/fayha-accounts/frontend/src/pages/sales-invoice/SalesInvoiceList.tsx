@@ -764,16 +764,16 @@ const SalesInvoiceList: React.FC = () => {
                                     try {
                                       setInvoices((prev) => prev.map((i) => i.id === inv.id ? { ...i, zatcaStatus: 'Pending Synchronization' } : i));
                                       const res = await salesInvoicesApi.reportToZatca(inv.id);
-                                      if (res.zatcaStatus === 'Synced With Zatca' || res.zatcaClearanceId) {
-                                        setInvoices((prev) => prev.map((i) => i.id === inv.id ? { ...i, ...res } : i));
-                                        toast.success(`${invoiceLabel} synced with ZATCA`, { id: toastId, style: { borderRadius: '12px', background: '#10b981', color: '#fff' } });
+                                      setInvoices((prev) => prev.map((i) => i.id === inv.id ? { ...i, ...res } : i));
+                                      toast.success(`${invoiceLabel} synced with ZATCA`, { id: toastId, style: { borderRadius: '12px', background: '#10b981', color: '#fff' } });
+                                    } catch (err: any) {
+                                      const updatedData = err?.data;
+                                      if (updatedData) {
+                                        setInvoices((prev) => prev.map((i) => i.id === inv.id ? { ...i, ...updatedData } : i));
                                       } else {
                                         setInvoices((prev) => prev.map((i) => i.id === inv.id ? { ...i, zatcaStatus: 'Rejected' } : i));
-                                        toast.error(`ZATCA rejected ${invoiceLabel}`, { id: toastId, style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
                                       }
-                                    } catch (err: any) {
-                                      setInvoices((prev) => prev.map((i) => i.id === inv.id ? { ...i, zatcaStatus: 'Rejected' } : i));
-                                      toast.error(err?.message || `Failed to report ${invoiceLabel} to ZATCA`, { id: toastId, style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
+                                      toast.error(err?.message || `Failed to report ${invoiceLabel} to ZATCA`, { id: toastId, duration: 6000, style: { borderRadius: '12px', background: '#ef4444', color: '#fff' } });
                                     }
                                   }}
                                   className="w-full text-left px-4 py-2.5 text-sm text-blue-700 hover:bg-blue-50 flex items-center gap-2.5"

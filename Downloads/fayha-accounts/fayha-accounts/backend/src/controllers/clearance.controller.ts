@@ -380,6 +380,17 @@ export const salesInvoiceController = {
         if (data[f] !== undefined) data[f] = Number(data[f]) || 0;
       }
 
+      // Auto-compute totals from line items if not provided at invoice level
+      const { items: rawItems } = req.body;
+      if (Array.isArray(rawItems) && rawItems.length > 0) {
+        const itemSubtotal = rawItems.reduce((s: number, it: any) => s + (Number(it.amount) || 0), 0);
+        const itemVat = rawItems.reduce((s: number, it: any) => s + (Number(it.vatAmount) || 0), 0);
+        const itemTotal = rawItems.reduce((s: number, it: any) => s + (Number(it.totalAmount || it.total) || 0), 0);
+        if (!data.subtotal) data.subtotal = itemSubtotal;
+        if (!data.vatAmount) data.vatAmount = itemVat;
+        if (!data.totalAmount) data.totalAmount = itemTotal || (itemSubtotal + itemVat);
+      }
+
       // Always compute balanceDue from totalAmount and paidAmount (never trust client value)
       data.balanceDue = (data.totalAmount || 0) - (data.paidAmount || 0);
 
@@ -405,7 +416,7 @@ export const salesInvoiceController = {
         nameAr: item.nameAr || '',
         description: item.description || '',
         amount: Number(item.amount) || 0,
-        vatRate: Number(item.vatRate || item.vatPercent || 0.15),
+        vatRate: Number(item.vatRate ?? item.vatPercent ?? 0.15),
         vatAmount: Number(item.vatAmount) || 0,
         totalAmount: Number(item.totalAmount || item.total) || 0,
       }));
@@ -747,7 +758,7 @@ export const salesInvoiceController = {
               nameAr: item.nameAr || '',
               description: item.description || '',
               amount: Number(item.amount) || 0,
-              vatRate: Number(item.vatRate || item.vatPercent || 0.15),
+              vatRate: Number(item.vatRate ?? item.vatPercent ?? 0.15),
               vatAmount: Number(item.vatAmount) || 0,
               totalAmount: Number(item.totalAmount || item.total) || 0,
             }));
@@ -866,7 +877,7 @@ export const salesInvoiceController = {
               nameAr: item.nameAr || '',
               description: item.description || '',
               amount: Number(item.amount) || 0,
-              vatRate: Number(item.vatRate || item.vatPercent || 0.15),
+              vatRate: Number(item.vatRate ?? item.vatPercent ?? 0.15),
               vatAmount: Number(item.vatAmount) || 0,
               totalAmount: Number(item.totalAmount || item.total) || 0,
             }));
@@ -981,7 +992,7 @@ export const salesInvoiceController = {
             name: item.description || item.serviceName || 'Service',
             quantity: Number(item.quantity) || 1,
             tax_exclusive_price: Number(item.unitPrice) || Number(item.amount) || 0,
-            VAT_percent: 0.15,
+            VAT_percent: Number(item.vatRate ?? 0.15),
             other_taxes: [],
           }))
         : [{
@@ -989,18 +1000,25 @@ export const salesInvoiceController = {
             name: 'Services',
             quantity: 1,
             tax_exclusive_price: Number((invoice as any).subtotalAmount) || Number(invoice.totalAmount) || 0,
-            VAT_percent: 0.15,
+            VAT_percent: (invoice.vatAmount && invoice.totalAmount) ? Number((invoice.vatAmount / (invoice.totalAmount - invoice.vatAmount)).toFixed(2)) : 0.15,
             other_taxes: [],
           }];
 
-      // Get ICV (invoice counter) from invoice number
-      const icv = parseInt(invoice.invoiceNumber.replace(/\D/g, '') || '1');
+      // Get ICV (Invoice Counter Value) — must be strictly sequential, never reused (BR-KSA-33)
+      // Use atomic counter stored in Settings table
+      const icvSetting = await prisma.setting.findUnique({ where: { key: 'ZATCA_LAST_ICV' } });
+      const icv = (icvSetting ? parseInt(icvSetting.value, 10) : 0) + 1;
+      await prisma.setting.upsert({
+        where: { key: 'ZATCA_LAST_ICV' },
+        create: { key: 'ZATCA_LAST_ICV', value: String(icv), type: 'STRING', category: 'ZATCA' },
+        update: { value: String(icv) },
+      });
 
-      // Get previous invoice hash
+      // Get previous invoice hash — must chain by ICV order, not createdAt
       const prevInvoice = await prisma.salesInvoice.findFirst({
-        where: { zatcaStatus: 'Synced With Zatca', id: { not: invoice.id } },
-        orderBy: { createdAt: 'desc' },
-        select: { zatcaHash: true },
+        where: { zatcaStatus: 'Synced With Zatca', zatcaIcv: { not: null } },
+        orderBy: { zatcaIcv: 'desc' },
+        select: { zatcaHash: true, zatcaIcv: true },
       });
       const previousHash = prevInvoice?.zatcaHash || 'NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzljMmRiYzcxMGM2MWRhYmYwYWE2M2Q2MDVhZjBhNTQyNA==';
 
@@ -1028,12 +1046,18 @@ export const salesInvoiceController = {
           where: { id: req.params.id },
           data: {
             zatcaStatus: isReported ? 'Synced With Zatca' : 'Rejected',
-            zatcaHash: signed.invoice_hash,
-            zatcaClearanceId: isReported ? `ZATCA-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}` : null,
+            zatcaIcv: icv,
+            zatcaHash: isReported ? signed.invoice_hash : null,
+            zatcaClearanceId: isReported ? (result.clearanceStatus || result.reportingStatus || 'REPORTED') : null,
             zatcaClearedAt: isReported ? new Date() : null,
           },
           include: { client: true, items: true },
         });
+
+        // If rejected, rollback the ICV counter so it can be reused
+        if (!isReported) {
+          await prisma.setting.update({ where: { key: 'ZATCA_LAST_ICV' }, data: { value: String(icv - 1) } });
+        }
 
         if (isReported) {
           res.json({ success: true, data: updated, zatcaResult: { reportingStatus: result.reportingStatus, warnings: result.validationResults?.warningMessages?.map((w: any) => w.code) } });
@@ -1042,6 +1066,8 @@ export const salesInvoiceController = {
           res.json({ success: false, error: `ZATCA rejected: ${errors.join('; ') || 'Unknown'}`, data: updated });
         }
       } catch (zatcaError: any) {
+        // Rollback ICV counter on failure so it can be reused
+        await prisma.setting.update({ where: { key: 'ZATCA_LAST_ICV' }, data: { value: String(icv - 1) } }).catch(() => {});
         const updated = await prisma.salesInvoice.update({
           where: { id: req.params.id },
           data: { zatcaStatus: 'Rejected' },
@@ -2137,7 +2163,7 @@ export const salesQuoteController = {
                 nameAr: item.nameAr || '',
                 description: item.description || '',
                 amount: item.amount || 0,
-                vatRate: (item.vatPercent || 15) / 100,
+                vatRate: (item.vatPercent ?? 15) / 100,
                 vatAmount: item.vatAmount || 0,
                 totalAmount: item.total || item.totalAmount || 0,
               })),

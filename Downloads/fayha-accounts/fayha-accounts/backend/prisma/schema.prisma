@@ -593,6 +593,7 @@ model SalesInvoice {
   status          String    @default("DRAFT")
   zatcaStatus       String    @default("Due")
   zatcaUuid         String?
+  zatcaIcv          Int?
   zatcaHash         String?
   zatcaQrCode       String?
   zatcaClearanceId  String?

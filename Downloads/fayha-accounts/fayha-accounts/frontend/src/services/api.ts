@@ -125,6 +125,15 @@ async function apiFetch<T = unknown>(
     throw err;
   }
 
+  // Handle API-level failures (HTTP 200 but success: false)
+  if (body && typeof body === 'object' && 'success' in body && body.success === false) {
+    const message = body.error || body.message || 'Operation failed';
+    const err = new ApiError(message, response.status, body.code, body.details);
+    (err as any).zatcaDetails = body.zatcaDetails;
+    (err as any).data = body.data; // preserve partial data (e.g. updated invoice)
+    throw err;
+  }
+
   // Unwrap `{ success: true, data: ... }` envelope
   if (body && typeof body === 'object' && 'success' in body && 'data' in body) {
     return body.data as T;

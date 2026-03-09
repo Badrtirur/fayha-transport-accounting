@@ -534,13 +534,59 @@ export interface InvoiceXmlData {
 }
 
 /**
+ * Determine the ZATCA VAT category code based on the VAT rate.
+ * S = Standard rate (15%), Z = Zero-rated (0%), E = Exempt, O = Out of scope
+ */
+function getVatCategoryCode(vatRate: number): string {
+  if (vatRate > 0) return 'S';   // Standard rate
+  return 'O';                     // Out of scope (zero VAT — reimbursables, govt fees, etc.)
+}
+
+/**
+ * Build grouped TaxSubtotal blocks per VAT category (S, E, Z, etc).
+ * ZATCA requires separate TaxSubtotal for each distinct tax category.
+ */
+function buildTaxSubtotals(lineItems: Array<{ vatRate: number; vatAmount: number; lineTotal: number }>, currency: string): string {
+  const groups: Record<string, { categoryCode: string; taxableAmount: number; taxAmount: number; percent: number }> = {};
+  for (const item of lineItems) {
+    const code = getVatCategoryCode(item.vatRate);
+    const key = `${code}_${item.vatRate.toFixed(2)}`;
+    if (!groups[key]) {
+      groups[key] = { categoryCode: code, taxableAmount: 0, taxAmount: 0, percent: item.vatRate };
+    }
+    groups[key].taxableAmount += item.lineTotal;
+    groups[key].taxAmount += item.vatAmount;
+  }
+
+  return Object.values(groups).map(g => {
+    const exemptionTag = g.categoryCode !== 'S'
+      ? `\n        <cbc:TaxExemptionReasonCode>VATEX-SA-OOS</cbc:TaxExemptionReasonCode>\n        <cbc:TaxExemptionReason>Out of scope of VAT</cbc:TaxExemptionReason>`
+      : '';
+    return `    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="${currency}">${g.taxableAmount.toFixed(2)}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="${currency}">${g.taxAmount.toFixed(2)}</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>${g.categoryCode}</cbc:ID>
+        <cbc:Percent>${g.percent.toFixed(2)}</cbc:Percent>${exemptionTag}
+        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>`;
+  }).join('\n');
+}
+
+/**
  * Build a ZATCA-compliant UBL 2.1 XML invoice (unsigned, no QR, no UBLExtensions).
  * This "pure" XML is what gets hashed for the invoiceHash.
  */
 export function buildUblXml(data: InvoiceXmlData): string {
   const isSimplified = data.invoiceSubType.startsWith('02');
 
-  const lines = data.lineItems.map((item, i) => `
+  const lines = data.lineItems.map((item, i) => {
+    const categoryCode = getVatCategoryCode(item.vatRate);
+    const exemptionTag = categoryCode !== 'S'
+      ? `\n          <cbc:TaxExemptionReasonCode>VATEX-SA-OOS</cbc:TaxExemptionReasonCode>\n          <cbc:TaxExemptionReason>Out of scope of VAT</cbc:TaxExemptionReason>`
+      : '';
+    return `
     <cac:InvoiceLine>
       <cbc:ID>${i + 1}</cbc:ID>
       <cbc:InvoicedQuantity unitCode="PCE">${item.quantity}</cbc:InvoicedQuantity>
@@ -552,7 +598,7 @@ export function buildUblXml(data: InvoiceXmlData): string {
       <cac:Item>
         <cbc:Name>${escapeXml(item.name)}</cbc:Name>
         <cac:ClassifiedTaxCategory>
-          <cbc:ID>S</cbc:ID>
+          <cbc:ID>${categoryCode}</cbc:ID>
           <cbc:Percent>${item.vatRate.toFixed(2)}</cbc:Percent>
           <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
         </cac:ClassifiedTaxCategory>
@@ -560,7 +606,8 @@ export function buildUblXml(data: InvoiceXmlData): string {
       <cac:Price>
         <cbc:PriceAmount currencyID="${data.currency}">${item.unitPrice.toFixed(2)}</cbc:PriceAmount>
       </cac:Price>
-    </cac:InvoiceLine>`).join('\n');
+    </cac:InvoiceLine>`;
+  }).join('\n');
 
   // Buyer address block
   const buyerAddress = data.buyerCountry === 'SA' && data.buyerStreet ? `
@@ -639,15 +686,7 @@ export function buildUblXml(data: InvoiceXmlData): string {
   </cac:PaymentMeans>
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${data.currency}">${data.vatTotal.toFixed(2)}</cbc:TaxAmount>
-    <cac:TaxSubtotal>
-      <cbc:TaxableAmount currencyID="${data.currency}">${data.subtotal.toFixed(2)}</cbc:TaxableAmount>
-      <cbc:TaxAmount currencyID="${data.currency}">${data.vatTotal.toFixed(2)}</cbc:TaxAmount>
-      <cac:TaxCategory>
-        <cbc:ID>S</cbc:ID>
-        <cbc:Percent>15.00</cbc:Percent>
-        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
-      </cac:TaxCategory>
-    </cac:TaxSubtotal>
+${buildTaxSubtotals(data.lineItems, data.currency)}
   </cac:TaxTotal>
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${data.currency}">${data.vatTotal.toFixed(2)}</cbc:TaxAmount>

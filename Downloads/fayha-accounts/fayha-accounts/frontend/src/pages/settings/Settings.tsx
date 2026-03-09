@@ -81,7 +81,7 @@ const Settings: React.FC = () => {
     // ZATCA onboarding state
     const [zatcaStatus, setZatcaStatus] = useState<any>(null);
     const [zatcaLoading, setZatcaLoading] = useState(false);
-    const [zatcaOtp, setZatcaOtp] = useState('123345');
+    const [zatcaOtp, setZatcaOtp] = useState('');
     const [zatcaMessage, setZatcaMessage] = useState('');
     const [zatcaLog, setZatcaLog] = useState<any>(null);
     const [zatcaLogLoading, setZatcaLogLoading] = useState(false);
@@ -644,11 +644,11 @@ const Settings: React.FC = () => {
                         <div className="card-premium p-6 space-y-6">
                             <div className="pb-4 border-b border-slate-100">
                                 <h2 className="text-lg font-bold text-slate-900">ZATCA E-Invoicing Onboarding</h2>
-                                <p className="text-sm text-slate-500 mt-0.5">Configure ZATCA Phase 2 sandbox integration. Complete all 4 steps to enable real invoice reporting.</p>
+                                <p className="text-sm text-slate-500 mt-0.5">Configure ZATCA Phase 2 e-invoicing integration. Complete all 4 steps to enable real invoice reporting.</p>
                             </div>
 
                             {zatcaMessage && (
-                                <div className={`p-3 rounded-lg text-sm ${zatcaMessage.startsWith('Error') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                                <div className={`p-3 rounded-lg text-sm whitespace-pre-wrap ${zatcaMessage.startsWith('Error') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
                                     {zatcaMessage}
                                 </div>
                             )}
@@ -685,7 +685,7 @@ const Settings: React.FC = () => {
                                             </div>
                                             <div>
                                                 <h4 className="font-semibold text-slate-900 text-sm">Get Compliance CSID</h4>
-                                                <p className="text-xs text-slate-500">Enter OTP from ZATCA portal (use 123345 for sandbox)</p>
+                                                <p className="text-xs text-slate-500">Enter OTP from ZATCA portal</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
